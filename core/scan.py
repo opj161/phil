@@ -73,6 +73,13 @@ def discovery_queries(args, min_end, horizon):
         return default_queries(args, min_end, horizon)
 
 
+def _num(v):
+    try:
+        return float(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def keep(m, seen, banned, args):
     """Protected admissibility filter. Returns the output record or None."""
     q = m.get("question") or ""
@@ -102,6 +109,10 @@ def keep(m, seen, banned, args):
         "outcomes": json.loads(m.get("outcomes", "[]")),
         "outcome_prices": prices,
         "clob_token_ids": json.loads(m.get("clobTokenIds", "[]")),
+        # top of book for the FIRST outcome as gamma reports it (Phil v2: lets
+        # lane tools skip placeholder books without a CLOB call per market)
+        "best_bid": _num(m.get("bestBid")),
+        "best_ask": _num(m.get("bestAsk")),
         "volume_24h": float(m.get("volume24hr") or 0),
         "liquidity": float(m.get("liquidityNum") or 0),
         "slug": m.get("slug"),

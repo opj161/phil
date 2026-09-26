@@ -64,4 +64,19 @@ def queries(now, min_end, horizon, args, protected):
         #    markets currently, so not included — revisit if that changes.)
         {**base, "_label": "econ-tag", "tag_id": 100328, "order": "volume24hr",
          "ascending": "false"},
+
+        # 5-7. Barrier-lane supply (Phil v2, 2026-09-26). The volume/date
+        #    queries above surfaced 12 of 144 priceable barrier markets live on
+        #    2026-09-26 (3-40 days out); these gamma tags surfaced 618 on 54
+        #    independent events: hit-price ladders (tag 102134, "What price
+        #    will X hit in <month>?"), crypto price levels (1312) and
+        #    commodities (101031). No volume floor: ladder rungs are thin
+        #    individually, and the engine's depth and spread checks decide
+        #    what is tradeable.
+        {**base, "_label": "hit-price-tag", "tag_id": 102134, "order": "liquidity",
+         "ascending": "false"},
+        {**base, "_label": "crypto-prices-tag", "tag_id": 1312, "order": "liquidity",
+         "ascending": "false"},
+        {**base, "_label": "commodities-tag", "tag_id": 101031, "order": "liquidity",
+         "ascending": "false"},
     ]

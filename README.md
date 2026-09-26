@@ -1,101 +1,98 @@
 # Phil the self-improving trader
 
-[![CI](https://github.com/bennyjo/phil/actions/workflows/ci.yml/badge.svg)](https://github.com/bennyjo/phil/actions/workflows/ci.yml)
+[![CI](https://github.com/opj161/phil/actions/workflows/ci.yml/badge.svg)](https://github.com/opj161/phil/actions/workflows/ci.yml)
 
 <img src=".github/phil.png" alt="Phil, a groundhog peeking over a rising price chart" width="100" align="left"/>
 
 **Phil is a self-improving trader: an AI agent that trades short-term
-prediction markets and rewrites its own strategy after every resolved
-bet.** Paper trading is the 24/7 learning engine. Real money runs alongside
+prediction markets and rewrites its own strategy and tools as bets
+resolve.** Paper trading is the learning engine. Real money runs alongside
 it, deliberately small: capped stakes through
-[Pearl Connect](https://github.com/valory-xyz/connect), only in edge classes
-whose settled evidence has earned it.
+[Pearl Connect](https://github.com/valory-xyz/connect), and only in lanes
+whose forward record has earned it.
 
 The name honors the man who relived the same day until he'd learned enough
 to win it, and the groundhog who makes forecasts.
 
+This is a fork of [bennyjo/phil](https://github.com/bennyjo/phil). v2
+(2026-09-26) rebuilt it around what 58 days of v1 journals showed:
 
-## The experiment
+- the LLM's own probabilities were slightly worse than the market's
+  (875 settled forecasts, Brier delta +0.008);
+- mechanical methods (barrier/touch models, de-vigged bookmaker lines,
+  counted base rates) matched or beat the market.
 
-Claude Code gets a simulated $1,000 bankroll and the short-term Polymarket
-universe: earnings beats, daily sports, pre-match esports, official economic
-prints, near-term news. Crypto up-or-down coin-flips are banned. Every cycle
-it settles yesterday's bets against official resolutions and scores its own
-calibration against the market price it paid. It writes a retrospective when
-bets have settled. A swarm of cheap screening subagents scores ~300 markets
-per full cycle against the live price (`core/screen.py`), and the agent
-spends its research slots on the largest divergences. It **edits its own
-playbook, risk policy, tooling, sensing** (the market-discovery queries and
-the screening prompt) **and pacing** (which hourly ticks deserve a full
-cycle). Then it commits the diff, researches, and bets again.
+## How v2 works
 
-Three layers keep it honest:
+- **Lanes.** A lane is a method with a pricing tool (`config/lanes.json`):
+  - `barrier`: price-path and price-level markets on crypto, commodities
+    and indices, 3+ days out, priced by a lognormal model with sourced
+    implied vol;
+  - `devig`: sports vs de-vigged bookmaker consensus from
+    [the-odds-api](https://the-odds-api.com);
+  - `mention`: say-the-word markets from counted transcript base rates;
+  - `explore`: everything else, forecast-only.
 
-- an **hourly cycle agent** that screens, researches, bets, and self-edits,
-  plus lightweight **watchers** (`core/watch.py`) that check every ~15
-  minutes for new listings and price moves on the agent's watchlist and
-  trigger an early cycle when something fires;
-- a **daily deep-retro agent** that audits every strategy edit (keep,
-  sharpen, or revert), grades the day's biggest estimation errors, and
-  adjudicates the cycle agent's proposals;
-- the **human operator**, who owns the protected engine (`core/`, the caps,
-  the cycle procedure). Evidence flows in through
-  `journal/operator-notes.md`. Asks flow out through `journal/proposals.md`
-  for changes only the operator can make.
-
-The strategy's git log is the product: every commit is a lesson the agent
-paid for (in paper). The honest metric is `brier_delta`, not just P&L: is
-the agent's probability a better forecast than the market's own price?
-
-## Two loops: paper learns 24/7, real money follows the evidence
-
-The learning engine is paper. An always-on cloud loop cycles hourly across
-the whole market universe, with watcher ticks every ~15 minutes in between,
-because hundreds of simulated feedback loops cost nothing and answer the
-question that matters: *in which market categories does fast AI research
-actually beat the price?*
-
-Real execution rides on top, deliberately small. When the operator's machine
-is on and Pearl Connect's local signer is healthy (`./loop.sh --real`),
-paper bets in edge classes with positive settled evidence get a **real
-twin** on Polymarket (Polygon). Orders go through `core/real.py`, the only
-code that touches funds, and the sizing is all config: per-bet, per-day and
-open-position caps live in `config/protected.json` (currently $1 per bet),
-with hard ceilings that CI enforces. The Safe holds only what the operator
-chooses to fund; its balance is the final cap no code can exceed. The agent
-never holds keys; every signature goes through Pearl Connect's audited
-local choke point. Real fills feed back into the journal so retros can
-measure what paper can't: actual fill quality versus the simulated
-cross-the-spread model.
-
-[Pearl Connect](https://github.com/valory-xyz/connect) is Pearl's BYOA
-signing service. It lets any agent harness, Claude Code included, act as an
-Olas Pearl agent without ever holding keys. To run it yourself, download
-Pearl at [pearl.you/connect](https://www.pearl.you/connect).
+  `strategy/tools/lanes.py` routes the scanned market universe into lanes and
+  prices it.
+- **The agent forecasts; the engine trades.** Every priced market becomes a
+  recorded forecast tagged with its lane. `core/ledger.py place
+  --forecast-id` then runs `core/decision.py`, the single protected engine
+  that replay and real twins also use:
+  1. it shrinks the estimate toward the market mid by the lane's weight λ,
+     fitted only from outcomes known at that moment;
+  2. it walks both outcome books;
+  3. it subtracts the market's taker fee;
+  4. it buys only when the net edge clears the bar, or logs why not.
+- **Self-improvement** is the agent editing its lane tools, series mappings
+  and a capped playbook from settled evidence. A daily deep retro audits
+  every edit, prunes the playbook, and grades each lane.
+- **Real money** follows lanes, not stories. `core/gate.py` judges each
+  lane's paper record since registration: 30+ events, a positive
+  event-clustered net ROI lower bound, and no single event dominating. The
+  operator promotes a PASS to `live`, and only then do $1 real twins run
+  through `core/real.py`.
 
 ## Honest-simulation rules
 
-- Paper fills cross the live CLOB spread (buy at best ask), like a real taker.
+- Paper fills walk the live CLOB ask book for the stake (VWAP) and pay the
+  market's taker fee (Polymarket: shares × rate × p × (1 − p), per-market
+  terms). P&L is net of fees.
 - Entry prices are recorded at bet time; resolutions are Polymarket's own.
-- The agent cannot edit the engine (`core/`, `config/protected.json`).
-  `loop.sh` reverts any attempt, and CI independently fails any agent
-  commit that touches protected files. Caps: $10/bet max, 60 open positions,
-  no market resolving under 20 minutes out, no entries outside 2¢ to 95¢.
+- Evaluation is point-in-time and event-clustered. Sibling markets count as
+  one observation.
+- The agent cannot edit the engine (`core/`, `config/`). `loop.sh` reverts
+  any attempt, and CI fails any agent commit that touches protected files.
+- Caps:
+  - $10 per bet and 60 open positions;
+  - $10 per event;
+  - 15 new positions an hour;
+  - no market resolving under 20 minutes out;
+  - no entries outside 5¢ to 95¢;
+  - shrunk edges above 15¢ are rejected as probable mapping errors.
 
 ## Run
 
 ```bash
-./loop.sh 10 45          # 10 paper cycles, 45 min apart (headless Claude Code)
-./loop.sh 1 45 --real    # one cycle with real twins via Pearl Connect
-python3 core/score.py    # calibration & P&L report any time
-python3 core/real.py doctor   # is the real-execution path ready?
+cp .env.example .env         # optional: ODDS_API_KEY for the devig lane
+./loop.sh 100000 60          # tick hourly, 24/7 (LIGHT ticks use no LLM)
+./loop.sh 1                  # one tick now
+python3 core/score.py        # P&L and calibration by lane
+python3 core/gate.py         # forward-test verdict per lane
+python3 core/replay.py       # point-in-time engine replay over all forecasts
+python3 core/test_engine.py  # engine tests (CI runs them)
+./loop.sh 1 60 --real        # a tick with real twins via Pearl Connect
 ```
 
 Requires [Claude Code](https://claude.com/claude-code) (`claude` on your
-PATH) and Python 3. Market data needs no API key; it comes from Polymarket's
-public gamma/CLOB endpoints. The bookmaker-odds benchmark (`core/odds.py`)
-needs an `ODDS_API_KEY` from [the-odds-api.com](https://the-odds-api.com),
-in the environment or in `~/.config/phil/odds-api-key`.
+PATH) and Python 3. Market data needs no API key: it comes from
+Polymarket's public gamma/CLOB endpoints, Coinbase, Deribit and Yahoo.
+
+Models are set by environment variables:
+- `PHIL_MODEL` for cycles (default `claude-sonnet-5`);
+- `PHIL_DEEP_MODEL` for the daily deep retro (default `claude-opus-5-5`).
+
+Every LLM tick's cost is logged to `journal/costs.jsonl`.
 
 ## Disclaimer
 

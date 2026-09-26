@@ -17,6 +17,11 @@ therefore NOT comparable to bet brier_delta; score.py reports them in
 separate sections. est_prob is the agent's honest belief, formed before
 anchoring on the price, exactly as for bets.
 
+Every forecast names its METHOD - a lane in config/lanes.json (Phil v2). The
+lane is what the engine (core/decision.py) fits its market-shrinkage weight
+on and what it decides to trade, so a forecast is also the only way into a
+bet: core/ledger.py place --forecast-id <id>.
+
 One live forecast per market+outcome: recurring re-checks of the same market
 must not flood the stats with correlated rows. A materially changed read
 (|delta est_prob| >= 0.05, or a changed funnel decision) may replace the live
@@ -28,15 +33,19 @@ revision was worse than the original).
 
 Usage:
   record: python3 core/forecast.py record --market-id 123 --outcome Yes \
-            --est-prob 0.62 --category econ --skip-reason no-edge \
-            [--fit-score 4] [--note "..."] [--strategy-rev abc1234] \
+            --est-prob 0.62 --method barrier --category commodities \
+            [--note "..."] [--strategy-rev abc1234] \
             [--confirm-extreme] [--supersede]
+  batch:  python3 core/forecast.py record-batch < specs.jsonl
+            (one JSON spec per line with the same fields; rows whose
+            "action" is neither record nor supersede are ignored)
   status: python3 core/forecast.py status
 """
 import argparse
 import datetime as dt
 import json
 import pathlib
+import re
 import sys
 import uuid
 from collections import Counter
@@ -46,6 +55,7 @@ import pmapi  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FORECASTS = ROOT / "journal" / "forecasts.jsonl"
+LANES = json.loads((ROOT / "config" / "lanes.json").read_text())["lanes"]
 
 # A supersede must change something material: a re-record of an unchanged
 # estimate is the correlated-row flooding the one-live-row rule exists to
@@ -60,6 +70,9 @@ MIN_REVISION_DELTA = 0.05
 # caught at the only moment it is fixable.
 EXTREME_DISAGREEMENT = 0.40
 
+# A book wider than this has no usable market probability (Phil v2).
+MAX_BENCHMARK_SPREAD = 0.20
+
 
 def read_forecasts():
     if not FORECASTS.exists():
@@ -71,7 +84,8 @@ def cmd_status(rows):
     print(json.dumps({
         "total": len(rows),
         "by_status": dict(Counter(r["status"] for r in rows)),
-        "by_skip_reason": dict(Counter(r.get("skip_reason") or "?" for r in rows)),
+        "by_method": dict(Counter(r.get("method") or r.get("method_inferred") or "?"
+                                  for r in rows)),
         "settled_wins": sum(1 for r in rows if r["status"] == "won"),
         "revised_away": sum(1 for r in rows if r.get("superseded_by")),
     }, indent=2))
@@ -87,44 +101,83 @@ def _num(value):
         return None
 
 
-def cmd_record(args, rows):
+def _fee_fields(fee):
+    return {"fees_enabled": fee["fees_enabled"], "fee_rate": fee["rate"],
+            "fee_exponent": fee["exponent"], "fee_type": fee["fee_type"]}
+
+
+class Rejected(Exception):
+    pass
+
+
+def record_one(spec, rows):
+    """Validate and append one forecast. spec keys: market_id, outcome,
+    est_prob, method, category and optionally skip_reason, supersede,
+    confirm_extreme, fit_score, note, strategy_rev. Appends the new row to
+    `rows` (so a batch sees its own earlier rows) and returns the summary.
+    Raises Rejected with the reason instead of writing anything."""
+    args = argparse.Namespace(**{"skip_reason": "engine", "supersede": False,
+                                 "confirm_extreme": False, "fit_score": None,
+                                 "note": "", "strategy_rev": "", **spec})
+    if args.method not in LANES:
+        raise Rejected(f"method {args.method!r} is not a lane in config/lanes.json")
+    args.est_prob = float(args.est_prob)
+    args.market_id = str(args.market_id)
     if not 0.0 < args.est_prob < 1.0:
-        sys.exit("REJECTED: est-prob must be in (0,1)")
+        raise Rejected("est-prob must be in (0,1)")
     live = [r for r in rows
             if r["market_id"] == args.market_id and r["outcome"] == args.outcome
             and r["status"] == "open" and not r.get("superseded_by")]
     if live and not args.supersede:
-        sys.exit("REJECTED: already have an open forecast on this market+outcome "
+        raise Rejected("already have an open forecast on this market+outcome "
                  "(a materially changed read may supersede it: --supersede)")
     old = None
     if args.supersede:
         if not live:
-            sys.exit("REJECTED: --supersede, but no live open forecast on this "
+            raise Rejected("--supersede, but no live open forecast on this "
                      "market+outcome to supersede")
         old = live[0]
         # round like ledger.py's edge field so an exactly-boundary revision
         # (0.33 - 0.28 = 0.049999...) does not float-drop below the gate
         if (round(abs(args.est_prob - old["est_prob"]), 4) < MIN_REVISION_DELTA
                 and args.skip_reason == old.get("skip_reason")):
-            sys.exit(f"REJECTED: supersede needs a material change — "
+            raise Rejected(f"supersede needs a material change — "
                      f"|delta est_prob| >= {MIN_REVISION_DELTA} "
                      f"(old {old['est_prob']}, new {args.est_prob}) or a changed "
                      f"skip-reason (old {old.get('skip_reason')!r})")
 
     m = pmapi.gamma_market(args.market_id)
     if m.get("closed"):
-        sys.exit("REJECTED: market is closed")
+        raise Rejected("market is closed")
+    lane = LANES[args.method]
+    if lane.get("shape_regex") and not re.search(lane["shape_regex"], m.get("question") or ""):
+        raise Rejected(f"question does not have the {args.method!r} lane's shape "
+                 f"(config/lanes.json shape_regex) - record it under the lane whose "
+                 f"method you actually used, or as 'explore'")
+    if lane.get("min_days_to_end"):
+        end = dt.datetime.fromisoformat(m["endDate"].replace("Z", "+00:00"))
+        days = (end - dt.datetime.now(dt.timezone.utc)).total_seconds() / 86400
+        if days < lane["min_days_to_end"]:
+            raise Rejected(f"resolves in {days:.1f} days, under the {args.method!r} "
+                     f"lane's min_days_to_end {lane['min_days_to_end']} - record it as "
+                     f"'explore' if you still formed an estimate")
     tokens = pmapi.market_tokens(m)
     if args.outcome not in tokens:
-        sys.exit(f"REJECTED: outcome {args.outcome!r} not in {list(tokens)}")
-    bid, ask = pmapi.best_prices(tokens[args.outcome])
-    if bid is None and ask is None:
-        sys.exit("REJECTED: empty book — no market probability to benchmark against")
-    mid = (bid + ask) / 2 if bid is not None and ask is not None else bid or ask
+        raise Rejected(f"outcome {args.outcome!r} not in {list(tokens)}")
+    book = pmapi.book_levels(tokens[args.outcome])
+    bid = book["bids"][0][0] if book["bids"] else None
+    ask = book["asks"][0][0] if book["asks"] else None
+    if bid is None or ask is None or ask - bid > MAX_BENCHMARK_SPREAD:
+        # a one-sided or placeholder book (e.g. 0.01/0.99 on a fresh listing)
+        # has no market probability: its "mid" would score any estimate as
+        # skill and corrupt the engine's per-lane lambda fit
+        raise Rejected(f"no real market price to benchmark against (bid {bid}, ask {ask}; "
+                       f"spread limit {MAX_BENCHMARK_SPREAD})")
+    mid = (bid + ask) / 2
 
     gap = abs(args.est_prob - mid)
     if gap > EXTREME_DISAGREEMENT and not args.confirm_extreme:
-        sys.exit(f"REJECTED: est_prob {args.est_prob} vs market mid {round(mid, 4)} "
+        raise Rejected(f"est_prob {args.est_prob} vs market mid {round(mid, 4)} "
                  f"for outcome {args.outcome!r} differs by {round(gap, 4)} "
                  f"(> {EXTREME_DISAGREEMENT}). If this extreme disagreement is your "
                  "researched belief, re-run with --confirm-extreme; if not, you "
@@ -150,6 +203,14 @@ def cmd_record(args, rows):
         # omits the field - never a guess, never a later re-read.
         "liquidity_at_record": _num(m.get("liquidityNum")),
         "volume_24h_at_record": _num(m.get("volume24hr")),
+        # Top-of-book sizes (shares), the event the market belongs to and the
+        # market's taker-fee terms, all at record time (Phil v2): the engine,
+        # replay and gate need depth, event clustering and net-of-fee edges.
+        "bid_size_at_record": book["bids"][0][1] if book["bids"] else None,
+        "ask_size_at_record": book["asks"][0][1] if book["asks"] else None,
+        "event_id": pmapi.event_id(m),
+        **_fee_fields(pmapi.fee_schedule(m)),
+        "method": args.method,
         "category": args.category,
         "skip_reason": args.skip_reason,
         "fit_score": args.fit_score,
@@ -167,13 +228,46 @@ def cmd_record(args, rows):
     else:
         with FORECASTS.open("a") as f:
             f.write(json.dumps(row) + "\n")
+    rows.append(row)
     out = {"recorded": row["id"], "mid": row["market_prob_at_record"],
            "bid": bid, "ask": ask, "delta_vs_mid": round(args.est_prob - mid, 4),
            "question": row["question"]}
     if old is not None:
         out["supersedes"] = old["id"]
         out["delta_est_prob"] = round(args.est_prob - old["est_prob"], 4)
-    print(json.dumps(out, indent=2))
+    return out
+
+
+def cmd_record(args, rows):
+    try:
+        print(json.dumps(record_one(vars(args), rows), indent=2))
+    except Rejected as e:
+        sys.exit(f"REJECTED: {e}")
+
+
+def cmd_record_batch(rows):
+    """One JSON spec per stdin line (the fields record takes, as JSON keys;
+    strategy/tools/lanes.py plan writes them). Every row passes the same
+    checks as a single record; a rejected row is reported and skipped."""
+    n_ok = n_rej = 0
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        spec = json.loads(line)
+        if spec.get("action") not in (None, "record", "supersede"):
+            continue
+        spec = {k: v for k, v in spec.items() if k in (
+            "market_id", "outcome", "est_prob", "method", "category", "skip_reason",
+            "supersede", "confirm_extreme", "fit_score", "note", "strategy_rev")}
+        try:
+            out = record_one(spec, rows)
+            n_ok += 1
+            print(json.dumps({"ok": True, "market_id": spec["market_id"], **out}))
+        except (Rejected, KeyError, ValueError, RuntimeError) as e:
+            n_rej += 1
+            print(json.dumps({"ok": False, "market_id": spec.get("market_id"),
+                              "error": f"{type(e).__name__}: {e}"}))
+    print(json.dumps({"recorded": n_ok, "rejected": n_rej}), file=sys.stderr)
 
 
 def main():
@@ -186,9 +280,12 @@ def main():
                    help="agent's honest probability, formed before reading the price")
     p.add_argument("--category", required=True,
                    help="agent-assigned category, e.g. earnings/soccer/esports/news")
-    p.add_argument("--skip-reason", required=True,
-                   help="funnel disposition: bet|no-edge|market-agrees|... "
-                        "(use 'bet' when a place follows this forecast)")
+    p.add_argument("--method", required=True, choices=sorted(LANES),
+                   help="lane whose method produced est_prob (config/lanes.json); "
+                        "the engine fits and trades each lane separately")
+    p.add_argument("--skip-reason", default="engine",
+                   help="optional disposition note; trading is decided by "
+                        "core/ledger.py place --forecast-id (the engine)")
     p.add_argument("--supersede", action="store_true",
                    help="replace this market+outcome's live open forecast with a "
                         "materially changed read (links the rows; the old one is "
@@ -200,11 +297,15 @@ def main():
     p.add_argument("--fit-score", type=int, default=None, help="playbook fit score 0-5")
     p.add_argument("--note", default="", help="one line of context (optional)")
     p.add_argument("--strategy-rev", default="", help="git rev of strategy/ used")
+    sub.add_parser("record-batch",
+                   help="record many forecasts: one JSON spec per stdin line")
     sub.add_parser("status")
     args = ap.parse_args()
 
     rows = read_forecasts()
-    if args.cmd == "status":
+    if args.cmd == "record-batch":
+        cmd_record_batch(rows)
+    elif args.cmd == "status":
         cmd_status(rows)
     else:
         cmd_record(args, rows)

@@ -14,3 +14,5 @@ subagent-template.txt
 
 # loop.sh single-instance guard
 .loop.pid
+
+.env

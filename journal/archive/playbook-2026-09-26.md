@@ -1,0 +1,6770 @@
+# Strategy Playbook
+
+AGENT-EDITABLE. This file is mine (the trading agent's) to rewrite as I learn.
+Every edit must be justified by evidence from settled positions (see
+`journal/retros/`). Version: v0 — seeded by the operator, unproven.
+
+## Thesis
+
+I cannot out-research the market on everything. I can win where (a) the market
+is thin or inattentive, and (b) public information is retrievable in minutes.
+Short-term markets force fast feedback: every settled bet is a data point on
+where my research actually beats the price.
+
+### Edge classes (added DEEP-2026-07-31, from the 2/2 vs 0/7 split)
+
+Rank every candidate by WHY the market should be wrong, strongest first:
+
+1. **Structural — information race**: the resolution-relevant fact is already
+   public and the book demonstrably hasn't finished repricing (verify at the
+   live book, not the mid). Evidence: `2dc417ed68f6` won.
+   **Multi-source verification standard (DEEP-2026-08-12, enacting the
+   DEEP-2026-08-02 pre-registration now that both pair legs have settled
+   lost — `b21e42c123a1` 2026-08-04, `d2dd24206542` 2026-08-12):** "the fact
+   is already public" requires at least one non-party primary source (wire
+   service Reuters/AP/AFP, host-government official statement, or the
+   resolver's own named source) — a consensus composed entirely of state
+   media of the parties to the event (PressTV, Mehr, TASS, Xinhua on the
+   Iran-vs-Gulf-states claims) does not qualify on its own, however many
+   outlets repeat it or how internally consistent they are. This is now a
+   general condition of the class, not just the spread-rule exception
+   below (which already applied a narrower version of this to
+   `b21e42c123a1` alone, DEEP-2026-08-05). Both pair legs lost on
+   state-media-only corroboration of a contested Iran-conflict claim: the
+   reporting was plausible and mutually consistent, and the resolver still
+   read the fact the opposite way on both legs.
+   **Fact-finality requirement (DEEP-2026-08-03):** the fact must be FINAL
+   as the resolver will see it — an official print/close/result — not an
+   estimate subject to scheduled revision, whenever the bet's margin sits
+   inside typical revision noise. Sunday box-office numbers are studio/
+   Comscore estimates revised by Monday actuals; `84ec821167d5` bet No at
+   0.16 on a "$2M short" (0.6%) margin from such an estimate and was
+   marked to ~0.02 within 10h as actuals landed. N outlets repeating one
+   provisional figure are ONE source, not N confirmations. Corollary: a
+   liquid book holding its price AFTER your headlines are public — or
+   moving further against you while you check — is the crowd pricing
+   something beyond the headline (revision risk, resolver read), not the
+   crowd being slow; the NG win (`2dc417ed68f6`) was the opposite shape,
+   an already-final official settlement print.
+   **Bracket-sibling verification / immediate-post-release-book trap
+   (2026-09-11, RETRO-20260911-1244):** for a bracket-set market (CPI/PPI/
+   GDP style, multiple binary legs on one release), once
+   `umaResolutionStatus` moves to `"proposed"` on the legs, checking the
+   sibling brackets directly by market ID is a cheap, sharp way to pin the
+   exact print — sharper than a calendar aggregator and available before a
+   primary-source page catches up (a clean bracket set has exactly one leg
+   near 1.0 and the rest near 0; if two adjacent legs are both elevated at
+   once, the set hasn't settled yet). The corollary this cycle had to learn
+   the hard way: an immediate post-release CLOB read, taken before that
+   proposed-resolution convergence, is NOT settlement corroboration — a
+   2026-09-11 cycle cited "the core-MoM-0.2 book moved to bid 0.72/ask
+   0.92" as market-side confirmation the Aug core CPI print was 0.2%; the
+   actual BLS print was 0.3%, the 0.2% leg fully reversed to ~0 within
+   the hour, and only the "treat as provisional" hedge already attached to
+   that note stopped the wrong figure from grading 11 open forecasts
+   against the wrong number. Don't cite "the market confirms X" for an
+   exact numeric print off an early, still-moving read — wait for a
+   proposed/clean-single-winner bracket set or a primary-source fetch.
+2. **Structural — cross-market inconsistency**: two related markets (sibling
+   1X2 legs, spread-vs-ML) imply contradictory probabilities. Evidence:
+   `1e8dec1078ba` won.
+   **Validity test (DEEP-2026-08-03):** the sibling's implied probability
+   must be actually INCOMPATIBLE with the target market's — work the
+   implication out numerically before citing it. A bracket market whose
+   range contains the target's threshold discriminates nothing:
+   `84ec821167d5` cited the $350-360M bracket (~85% Yes) as contradicting
+   beat-record-$357.1M (~84% Yes), but $357.1M is inside the bracket, so
+   those prices are perfectly consistent (crowd centered ~$357-360M).
+   The claimed inconsistency was an inference error, not a signal.
+   **Sensing (DEEP-2026-08-05, integrating operator-notes.md §1):** finding
+   siblings used to be opportunistic (only noticed when a candidate happened
+   to be part of an obviously-bracketed cluster). `strategy/tools/siblings.py
+   <market_id>` fetches every sibling market on the same Polymarket event in
+   one call (gamma `/markets?id=` exposes an `events[0].id`, and
+   `/events/<id>` returns all markets on it with live prices — verified live
+   2026-08-05, a soccer exact-score event returned 17 siblings) and prints a
+   `_sum_check` of their Yes prices. For a genuinely mutually-exclusive,
+   fully-covering set this should sum to ~1.0 (+vig); a sum far off is a
+   candidate worth the numeric-implication check above. Run it on any
+   candidate whose question implies siblings exist (brackets, exact-score,
+   winner-of-N, spread-vs-ML pairs) as a normal part of research.
+   **Caveat found on first live use:** the test event's 17 sum-checked to
+   4.24, not ~1 — but every individual price sat in a narrow 0.23-0.26 band
+   regardless of how plausible the score (0-0 same price as 3-3), and each
+   market's `liquidityNum` was ~$100. That is untraded/placeholder resting
+   prices, not a mispriced market — nobody would leave a real 4x-overround
+   arb sitting there. **Always check book depth/spread (existing `max_spread`
+   veto) before treating a sum-check deviation as a signal**; a sum-check
+   flag on a thin book is a data-quality tell, not an edge.
+   **Coverage is per EVENT (2026-09-19 00:0xZ):** run the census BEFORE the
+   first web search on a bracketed candidate, and read `my_open_forecasts`
+   on every sibling. Evidence: the BanRep September event was researched
+   twice in 8 hours (hold rung 55fa44583b8b at 16:25Z, +50bp rung
+   668cd9a0adc6 at 00:00Z, same sources, same read) because the coverage
+   check asked only whether the pool's market id had a forecast. A sibling
+   with an open forecast under ~6h old and no new fact means the new rung
+   is recorded from that research, not re-researched.
+   **Sibling-group census (DEEP-2026-08-22): the "question implies
+   siblings" trigger is not enough — make the census standing.** Zero
+   cross-market candidates entered the funnel between ~Aug 12 and Aug 22
+   while cross-market is the ONLY real-eligible edge class
+   (config/protected.json real.allowed_edge_classes) and one of the two
+   classes with settled wins (`1e8dec1078ba`; the CPI-cluster arithmetic
+   of Aug 11-12). The trigger fires only when a researcher happens to
+   pick up a bracket-shaped question — a structurally invisible channel
+   whenever research minutes go elsewhere, which is exactly what the
+   window audits keep showing. Scan output has carried `event_id` since
+   2026-08-05 (operator instrument change) precisely to make this cheap:
+   **every FULL cycle's scan step groups the scan output by `event_id`,
+   counts groups with 2+ admissible markets, and logs `sibling_groups: N`
+   (with the top group's event_id and liquidity) in the funnel line.**
+   When N>0 and no higher-priority research exists (mechanical-econ due,
+   watch-item trigger fired), spend one research slot on the
+   highest-liquidity group's consistency arithmetic (siblings.py for live
+   prices, then the numeric-implication test above, book-depth caveat
+   included). This is a counting rule, not a betting rule — the point is
+   that the one class real execution can act on stops being invisible to
+   selection grading.
+3. **Book-devig arbitration** (weakest): "my devig of scraped bookmaker odds
+   beats the PM price" on a liquid market. A 1-cent-spread PM book with real
+   depth is made by someone pricing off the same feeds, live — this class is
+   a head-to-head contest with a sharper counterparty and went **0/7 on
+   2026-07-30/31** (`1436bb727464`, `8e67cf4882bc`, `83ef29ef9493`,
+   `4d5a4304a4d0`, `3cce11272d9d`, `1399450675ba`, `2c4c6a2adc0a`;
+   P(0/7 | own ests) ≈ 1%). It requires `risk.json min_edge_book_devig`
+   (0.07), not the base `min_edge`, and a power devig (see Estimation).
+   Confirmed 2026-07-31/08-01 at zero cost: ~12 clean benchmarks devigged
+   across MLB/WNBA/soccer, every tight PM book matched the devigged line
+   within 1-2 cents (cycle logs 17:11Z–02:12Z).
+   **Post-power-devig record (DEEP-2026-08-06): 2W/0L** — `509650e5ec31`
+   (edge 0.10) and `2363018c118b` (edge 0.0795, Blue Jays +1.5), both
+   power-devigged single-book lines against tight 0.01-spread PM books,
+   both clearing the 0.07 floor with margin. The 0/7 above was the
+   proportional-devig era; n=2 since the fix is far from a verdict, but
+   the class is no longer zero-for-everything. The 0.07 floor also became
+   BINDING for the first time this window (~10 clean devig edges
+   0.003–0.050 skipped, funnel.jsonl 2026-08-05/06, largest A's/Reds
+   0.050) — its cost is now measured in skipped candidates instead of
+   hypothetical. Unchanged at n=2; the blocked 0.02–0.05 band on tight
+   MLB books is exactly the sharp-counterparty zone the 0/7 came from.
+
+   **Recreational/political bookmaker tables are a weaker counterparty
+   than sports sharp books — don't treat them as the same evidence tier
+   (2026-09-17, `b063db346052` settled LOST).** The sports-book-devig
+   record above (2W/0L post-fix) is built on liquid, continuously-updated
+   sharp books (MLB/soccer/WNBA feeds via `core/odds.py`). The Liberals
+   entry instead devigged "ten Swedish bookmakers over/under 4.0" scraped
+   via WebSearch — the rationale itself flagged this table as undated and
+   the books as recreational (8pct overround) before betting. Settlement
+   confirms the flagged risk: PM had already repriced 0.375→0.50 on Sep 4
+   in anticipation of the Novus 4.3 poll (confirmed by the outcome — L
+   cleared decisively at 5.40%), while the scraped book table and the
+   devig built on it lagged that move. A book-devig edge on an election/
+   political market needs either a dated, refreshable book source (not a
+   one-off WebSearch scrape) or an explicit check for recent poll-driven
+   PM moves the books haven't caught up to yet; absent both, treat the
+   edge as sports-book-devig treats a stale line (§thin-or-stale-book
+   caution above), not as a clean sharp-book read. n=1 for this specific
+   failure mode — a caution to weigh at entry, not yet a ban.
+
+Info-race status (updated DEEP-2026-08-12): the class is **2W/4L by
+decision** — wins on mechanical/final facts (`2dc417ed68f6` official
+print, `1e8dec1078ba` cross-market), losses on provisional or
+interpretation-dependent ones (ai-leaderboard pair as one decision,
+`84ec821167d5`, `b21e42c123a1` settled LOST -$5 on 2026-08-04 via a normal
+UMA flow: est 0.90 on state-media-sourced claims, resolver waited out the
+market's 3-day conflicting-reports clause and resolved No, and now
+`d2dd24206542`, the sibling leg, settled LOST -$5 on 2026-08-12 — 12 days
+past end date with no UMA proposal ever submitted, book decayed to
+bid/ask 0.001/0.002 and never recovered). Both legs of the
+DEEP-2026-08-02 pre-registered pair are now settled losses: the rule is
+**enacted**, not a caution — see the multi-source verification standard
+under edge class 1 above. Net effect of this one Iran-conflict pair on
+the info-race record: -$10, 2 of the 4 losses.
+
+**Ledger edge_class split (DEEP-2026-08-26): `fact-final` is its own
+class.** The 2W/4L info-race record above splits exactly on
+fact-finality (wins on already-final mechanical facts, losses on
+provisional/interpretation-dependent ones), and the operator's
+architectural ruling (operator-notes 2026-08-05 ~19:45Z) draws the same
+line: fact-final reads — "official numbers the market hasn't priced
+correctly" — are what this architecture is built for, while racing a
+reprice is not. 2026-08-26 04:27Z produced the clean prototype:
+`5fbf676cfd7f`, $5 Diamondbacks ML @0.138 on a game already Final
+(ARI 5-4, MLB Stats API gamePk 825042, independently re-verified by
+DEEP-2026-08-26 against the market slug `mlb-chc-ari-2026-08-25`) with
+the book still pricing Cubs 0.866. Rule for future bets: when the
+resolving fact is ALREADY IMMUTABLE at bet time (official print
+published, game over, vote counted — only resolver deviation can lose),
+record ledger `edge_class` **`fact-final`**; **`info-race`** keeps only
+pre-final shapes (scheduled-but-unhappened events like the GTA VI
+trailer `c6f16acc55d9`, running counts, announced-not-confirmed facts).
+The two open 2026-08-25/26 rows are ledger-frozen as `info-race` (only
+core writes the ledger); retros grade `5fbf676cfd7f` under fact-final
+manually. score.py's by-class table picks the split up automatically as
+labeled rows settle. If fact-final reaches n>=5 settled with the record
+the operator's note predicts, a proposal to add it to
+`real.allowed_edge_classes` is warranted; not before.
+
+**First settlement (RETRO-20260826-0818): `5fbf676cfd7f` WON, +$31.23**,
+brier_delta -0.7421 — no resolver deviation, official box score matched the
+already-final fact at bet time. **fact-final running total: n=1, 1W/0L,
++$31.23.** 1 of the 5 settlements needed before the `real.allowed_edge_classes`
+proposal is warranted. The wide-book
+exception (§Spread-rule scope) reads on both labels wherever it says
+"info-race class" — its tightened condition (1) (fact FINAL/MECHANICAL)
+is definitionally satisfied by fact-final and remains the binding test
+for info-race proper.
+
+**Liquid-book credibility rule (pre-registered on `c6f16acc55d9`
+DEEP-2026-08-26, trigger fired 2026-08-28 06:xx Z cycle):** the fork's
+"premiere airs unlabeled" branch occurred. Rockstar's Aug 27 premiere
+aired as "Grand Theft Auto VI: An Extended Look" (official Newswire and
+YouTube title, a 26-minute gameplay presentation), while market 2732505
+requires content "clearly labelled and marketed as a trailer" — the
+liquid book ($23.6k), which had refused to converge toward the est-0.90
+read for two weeks, now prices Yes 0.069 vs the 0.36 entry (MTM ~-$4).
+The market was never inattentive; it was pricing resolution-criteria
+risk the research treated as noise. RULE, effective now: **an info-race
+rationale claiming "the market hasn't noticed X" is credible only on a
+thin or stale book.** On a LIQUID book (roughly, liquidity >= $10k or
+spread <= 0.02 with real depth) that has not converged after an
+apparently-known catalyst, the presumption reverses: the market is
+pricing a criteria/eligibility risk the research missed. Before betting
+such a book, the rationale must (i) quote the exact resolution wording,
+(ii) name the specific non-obvious reading the market is discounting,
+and (iii) say why that discount is wrong — "they haven't seen the news"
+is not admissible for liquid books on scheduled catalysts. Two
+independent evidence lines: this row (liquid-book analog of
+`b21e42c123a1`, the criteria-risk loss class), and the BoK live-CLOB
+convergence observation (§BoK grading notes: on scheduled announcements
+the CLOB is structurally faster than WebSearch indexing, so quote the
+book before claiming an info edge). Ledger grading of `c6f16acc55d9`
+itself still happens at settlement (Sep 1; a labeled trailer by Aug 31
+would flip it, market says ~7%).
+
+**Sharpened DEEP-2026-08-28 — the rule binds BETS, not just claims:**
+for ANY bet on a book with liquidity >= $10k, the ledger rationale MUST
+quote the decisive resolution clause(s) verbatim, whatever the edge
+class or rationale shape. Evidence: `bbe450e04eb9` (Lake America No
+@0.668, $58.8k book) was placed hours after this rule landed with a
+sound mechanical-timeline thesis but WITHOUT quoting the market text —
+which contains a dual-label clause ("both 'Lake America' and 'Lake
+Ontario'" = YES) and a credible-reporting alternative source, both of
+which fatten the Yes tail the est-0.96 never priced. The bet stands
+(the 4-day GNIS timeline still favors No decisively) but the estimate
+was overconfident by exactly the unread-clause tail — the recurring
+z≈−3 signature. A liquid-book bet whose rationale lacks the clause
+quote is a discipline violation from this point on.
+
+**Fact-finality gate on large info-race edges (DEEP-2026-08-30):** a
+claimed edge > 0.10 can pass the outside-view veto ONLY on (i) a fact
+already IMMUTABLE at bet time — fact-final: official print published,
+game over, vote counted, only resolver deviation can lose — or (ii) a
+cross-market arithmetic inconsistency computable from live books. A
+documented-but-unfinished process (an EO clock, an agency workflow, a
+rollout precedent, a scheduled-but-unhappened event) is a timeline
+FORECAST, not a fact, however good the paper trail: the market can read
+the same documents, and est-vs-price disagreement above 0.10 on a
+liquid book reverts to the veto exactly like a self-model. Quoting the
+resolution clause and then dismissing it with an unsourced assumption
+(6f7dfb5b7c0c: "dual-label still needs the GNIS step first") satisfies
+the documentation rule while repeating the error — the gate closes that
+path. Evidence, all settled: >0.10-claimed-edge bets now 0W/7L −$35
+(7e753de88823, 0bf9fe3785c6, b21e42c123a1, 84ec821167d5, d6d71ab454dc,
+bbe450e04eb9, 6f7dfb5b7c0c — the last two the Lake America pair,
+edge 0.292/0.44, settled LOST 2026-08-30 06:14Z); info-race 2W/4L split
+exactly on fact-finality (wins 1e8dec1078ba, 2dc417ed68f6 both
+final/mechanical; all four losses provisional/interpretive) — the Lake
+pair is counted separately above pending a consistent recount of the
+narrative info-race tally; fact-final 1W/0L +$31.23 (5fbf676cfd7f).
+**Reaffirmed at settlement (2026-08-30 06:14Z):** both Lake America legs
+settled LOST — bbe450e04eb9 (Aug31, No @0.668, est 0.96) and 6f7dfb5b7c0c
+(Sep4, No @0.38, est 0.82) — the rename completed inside the GNIS clock
+the thesis relied on as a floor, confirming both were timeline forecasts,
+not facts. The gate stands unchanged. The gate would
+have blocked both Lake America legs and the GTA VI bet while touching
+neither structural win, the fact-final prototype, nor any ≤0.10 bet. The
+mechanical-econ carve-out is unaffected (its band is 0.10–0.20 against a
+QUOTED external benchmark — condition (ii)-like, and separately gated).
+
+**Gate's founding evidence set CLOSED (RETRO-20260901-0639, GTA VI
+settled 2026-09-01):** `c6f16acc55d9` (Yes @0.36, est 0.90) LOST — the
+Aug27 premiere aired unlabeled ("An Extended Look," not a trailer) exactly
+as the liquid-book fork anticipated. All three founding bets are now
+**3 settled-lost out of 3, zero reconsideration triggers**:
+Lake America ×2 + GTA VI. Running >0.10-claimed-edge bet tally: **0W/8L
+−$40** (adds GTA VI's −$5 to the prior 7e753de88823/0bf9fe3785c6/
+b21e42c123a1/84ec821167d5/d6d71ab454dc/bbe450e04eb9/6f7dfb5b7c0c list).
+No further grading duty attaches to this gate's founding set; future
+>0.10-edge liquid-book bets extend the tally but don't reopen this
+evidence review.
+
+**Clause-to-outcome mapping (2026-09-07 17:58Z, `0ed1d77858d7` open,
+enacted outcome-independent):** condition (i) is satisfied only when the
+immutable fact MAPS to the outcome under the clause as written, and the
+map has to be shown, not asserted. Required in the rationale of any bet
+whose thesis is "fact plus calendar" or "fact plus rule": (a) the
+concrete sequence of events by which the OTHER side resolves, and (b)
+why the clause's own timing closes that sequence. The market's end date
+is not the resolution horizon unless the clause says so; windows,
+clocks and grace periods defined in the description govern. Evidence:
+the Iran ceasefire No bet (est 0.93 @0.54, claimed edge 0.39, class
+info-race) quoted the operative sentence ("resolves Yes if any such
+period is completed where the most recent qualifying military action
+occurred on or before the specified end date") and read it as "the
+window must close by the end date." It means the reverse: the last
+strike must fall on or before the end date, and the 14-day window may
+complete after it (through 12:00 ET Sep 15 from the Sep 1 strike). The
+Yes path was open the whole time, the market priced it (0.54 No at
+entry, 0.42 No on deadline day), and eight checkpoints re-confirmed the
+fact without re-reading the clause. Superseded to No 0.40, no edge
+(`1063bcaec323`). Same family as the Lake America dual-label miss: the
+DEEP-2026-08-30 quote rule was satisfied and the error survived it.
+This paragraph closes that path: a quoted clause with no (a)/(b) mapping
+is a documentation violation, and a fact that needs a window to run
+past the end date to be decisive is a timeline forecast under the gate,
+not a fact. Grading duty: when `0ed1d77858d7` settles, the info-race
+tally gets a note that this row was a clause-mapping error, not a
+fact-quality error (RETRO-20260907-1758 §2).
+
+NOT an edge class — **resolver-interpretation reads** (graded
+DEEP-2026-08-01): "I checked the exact resolution source and it says X"
+where the reading requires a judgment call (UI toggle, table choice, which
+mirror). The ai-leaderboard pair (`7e753de88823`+`0bf9fe3785c6`, one
+decision, -$10) lost while the operator verified the named source three
+times over 22h — including after resolution — and it never moved
+(journal/operator-notes.md). The fact was right; the resolution process
+read it differently. Treat these below book-devig; the §Estimation
+resolver-process red-flag rule applies.
+
+## Fit rubric (DEEP-2026-08-05, operator mandate: selection is a learned
+competency and was ungraded)
+
+Estimation is measured to death (brier_delta by category/edge class); WHICH
+markets I choose to spend research budget on was not measured at all — a
+0-for-N day could mean "no edge existed" or "edge existed, wrong candidates
+picked" or "queries built the wrong pool", and nothing distinguished them.
+Score every candidate that reaches research (not just ones I bet on) against
+five properties, derived from the settled record (2W/3L info-race split by
+fact-finality; the Blue Jays book-devig win; the $20k-econ-vs-$400k-tennis
+asymmetry):
+
+1. **Mechanical resolution** — official print/close/countable metric/
+   arithmetic, not a narrative or judgment call. (Y/N)
+2. **Benchmark reachable** — open API, WebSearch-dense coverage, or
+   Polymarket-internal arithmetic (siblings), confirmed reachable THIS cycle,
+   not assumed. (Y/N)
+3. **Edge persistence hours-to-days** — if the thesis would decay in minutes
+   (a repricing race), score N; this architecture's unit of action is a
+   multi-minute research session and cannot win a speed race (operator-notes
+   2026-08-05 ~19:45Z). (Y/N)
+4. **Bounded resolution tail** — no open-ended dispute/UMA risk of the kind
+   that locked `d2dd24206542` 5+ days past end date. (Y/N)
+5. **Research cost small relative to payout** — thin-liquidity/high-effort
+   candidates (a $20-1000 China-CPI bracket needing a scrape) score N even if
+   1-4 pass.
+
+Fit score = count of Y (0-5). Candidates scoring ≤2 are exploration-budget
+territory (see below), not default research targets. Log the score inline
+with the skip/bet reason per candidate (funnel instrumentation below) — this
+is what lets a deep retro grade selection the way `core/score.py` grades
+estimates: which properties actually produced settled edge per research-hour.
+
+**Same-day index/ETF direction, first instance (2026-08-10):** SPX/SPY
+"up or down today" markets (resolve on official close vs prior close,
+same-day) score N on property 3 — a directional call with ~100min to
+resolution is a reaction-speed contest on the world's most liquid feed, the
+same architecture problem operator-notes 2026-08-05 ruled out for info-race.
+A naive Brownian-bridge model (vol scaled by sqrt(session-time-remaining))
+claimed a large edge (SPX Down priced 0.78-0.805 ask vs model ~0.57-0.59) —
+exactly the "large claimed edge in an efficient market" shape that's 0W/5L
+elsewhere in the record; treat any such reading as a modeling gap, not
+alpha, and decline regardless of size. Recorded as forecasts
+(skip-reason `architecture-mismatch`) for calibration only, not researched
+as bet candidates going forward absent a property-3 change.
+Threshold-close variants ("SPY closes above $X on <date>") are the same
+family and take the same label. RETRO-20260917-2050: forecast
+`ddab4cfd4c5b` (SPY > $765 on Sep 17, settled No) was filed `no-edge` in
+category `commodities`, and its note quoted the screener's stale mid
+(0.095) while the record-time book was 0.14/0.15 - against the live book
+the same 0.09 estimate read as a 0.05 No-side "edge" on a $683 book, the
+exact shape this rule declines. Label these `architecture-mismatch` /
+`commodities-touch` like the Sep 4 row `d810e5c5d49f`, and quote the
+record-time bid/ask in the note, never the screener mid.
+
+## Funnel instrumentation (DEEP-2026-08-05, operator mandate)
+
+Selection was ungraded because nothing recorded the funnel between "scan
+pool" and "bet placed" — cycle logs only ever showed the researched subset,
+never what was skipped or why. Every FULL cycle, append one JSON line to
+`strategy/funnel.jsonl` (strategy-owned, not the ledger) with:
+`{"cycle": "<UTC ISO>", "strategy_rev": "<short sha>", "pool_by_query":
+{"<discovery.py _label>": <n>}, "researched": [{"market_id": "<id>",
+"category": "<cat>", "fit_score": <0-5>, "skip_reason":
+"no-edge|benchmark-unreachable|ambiguous-resolution|budget-exhausted|
+market-agrees|bet-placed"}]}`. This is additive to the cycle-log prose, not
+a replacement — the prose stays for narrative context, the JSONL is what a
+deep retro scripts against to grade selection quantitatively (e.g. which
+fit-score bucket produced the settled wins). Skip reasons must be the actual
+reason, not padded — a "market-agrees" skip on something that later moved
+20 points is a selection error, and only shows up in a retro if the original
+call is on record.
+
+**Skip-reason taxonomy rule (DEEP-2026-08-11):** `outside-view-veto` may
+appear in a funnel row ONLY when a forecast row exists for that
+market+outcome (link its forecast_id) — the veto blocks *bets*, never
+*estimates*; a vetoed candidate by definition had a concrete estimate,
+and unrecorded vetoed estimates are exactly what makes the veto
+unfalsifiable. When research concluded no honest independent estimate
+could be formed (contradictory sources, interpretive-inference-only,
+no credible poll), the skip reason is `benchmark-unreachable`, whatever
+made research stop — the estimate-bearing/estimate-free line is what the
+coverage audit reconciles against forecasts.jsonl. Evidence of the blur
+this fixes: MN-Gov (2026-08-10 04:16Z) and SC round-1 (07:33Z) both
+logged `outside-view-veto` with no forecast (estimate never formed),
+while SC round-1 (14:39Z) logged the same reason WITH forecasts — same
+label, opposite auditability. Also: every researched funnel entry
+carries its forecast_id(s) inline (the 2026-08-11 02:21Z entry omitted
+them; coverage was verified clean, but only by market_id
+reconciliation, which does not scale).
+
+**Same-commit rule (DEEP-2026-09-13): the funnel line ships with the
+cycle commit.** A FULL cycle's commit that appends no `strategy/funnel.jsonl`
+line is a violation on its face, exactly like a veto settlement without its
+CF-table row (2026-08-23 rule) — "the prose stays for narrative context"
+was never license to let the prose replace the JSONL. Evidence: 7 of the 9
+FULL cycles between DEEP-2026-09-12 and DEEP-2026-09-13 (10:18Z through
+04:20Z) wrote rich funnel *prose* in cycles.log and zero funnel lines —
+the 10:18Z cycle alone researched 5 candidates to concrete estimates and
+recorded 5 forecasts, none of it machine-readable. All 7 were backfilled
+by DEEP-2026-09-13 (flagged `"backfill"` in the lines; pool_by_query lost
+for 6 of them because prose only kept totals). A cycle that researched
+nothing still writes the line with `"researched": []` — an empty window on
+record is selection data; a missing line is indistinguishable from a
+skipped duty. If a third window shows the same drift after this rule,
+propose a mechanical CI-side check (cycle-log FULL line count vs funnel
+line count) instead of more prose.
+
+**Taxonomy addition (DEEP-2026-08-13): `category-bar`.** A decline whose
+operative reason is a playbook category bar (contested primaries; the
+general-election extension below) uses skip reason `category-bar`, not
+`outside-view-veto` — the veto is specifically the >0.10-claimed-edge
+numeric boundary, and its settled record (6-for-6 pre-registered, n=3
+officially settled at brier_delta +0.1109) is only interpretable if the
+label stays coextensive with the definition. Evidence of the blur this
+fixes: fa185b55a5c3 (Zambia, 2026-08-13 04:18Z) logged `outside-view-veto`
+"by extension" at claimed edge ~0.05 — a principled decline under the
+election bar, but under the wrong label; at settlement it would pollute
+the veto slice with a row the veto never fired on. Same forecast-row
+requirement as the veto: an estimate was formed, so a forecast row is
+mandatory and its forecast_id goes in the funnel line.
+
+**Taxonomy addition (DEEP-2026-08-14): `wide-spread-veto`.** A decline
+whose operative reason is the max_spread rule (book spread > 0.06 blocks
+the bet regardless of apparent edge) uses skip reason `wide-spread-veto`,
+not `outside-view-veto`. Evidence this split is load-bearing, not
+pedantry: of the 8 settled rows labeled `outside-view-veto`, the 5
+self-generated-model rows (SC Fry, MN Craig/Flanagan, Musk 120-139 and
+140-159) settled at mean dBrier **+0.118 — market better on every row**,
+while the 3 wide-spread rows (PPI 5.3%/5.4%/≥6.0%, mechanical base-effect
+model, ids 5ad483698a95/169b4fd6c04a/4908388c9fd7) settled at mean dBrier
+**-0.010 — agent better on every row**. One label was averaging two
+mechanisms with opposite settled signs, which corrupts both instruments:
+the veto's "N-for-N" record only means something over rows where the veto
+actually fired on estimate quality, and the spread rule's *cost* (edges
+foregone to illiquidity, which the PPI rows show can be real) is invisible
+unless its rows are separable. Same forecast-row requirement as the other
+estimate-bearing labels. When both apply (self-model edge AND wide book),
+use `outside-view-veto` — estimate distrust dominates, since the estimate
+would be blocked at any spread.
+
+**Taxonomy extension (RETRO-20260908-1612): `no-edge` vs
+`wide-spread-veto`.** The DEEP-2026-08-14 rule above ruled on
+`outside-view-veto` vs `wide-spread-veto` and never said what `no-edge`
+may not be used for, so the third leg leaked. Rule: **`no-edge` means the
+EDGE ITSELF failed to clear the floor.** If the edge cleared the floor
+and only `max_spread` blocked the bet, the label is `wide-spread-veto` -
+even when the ask-side edge looks marginal, and even when the wide book
+is what made the nominal edge look small in the first place. Same
+forecast-row requirement as the other estimate-bearing labels.
+
+Evidence, and the erratum it forces. Forecast `96065826ed50`
+(2026-09-08 08:22Z, Go Ahead Eagles resumed-match win, est 0.91 vs mid
+0.7555, ask 0.869, spread 0.227) was recorded `no-edge` while its own
+note read "nominal ask-edge 0.041 clears min_edge (0.04) but the spread
+(0.227) is far over max_spread (0.06) ... no bet, spread veto binds."
+It settled LOST at dBrier **+0.2573**. `forecasts.jsonl` is core-written
+and cannot be corrected in place, so **reclassify this row by hand
+before reading either slice**:
+
+- `no-edge` (n=307, printed +0.0009, aggregate ≈ +0.276) carries
+  +0.2573 of its total in this ONE row. Drop it and the remaining 306
+  rows sum to ~+0.02, a mean on the order of +0.0001 - flat. Robust to
+  the printed rounding (remaining mean lands in +0.00001..+0.0001
+  either way). The clean-feed-null instrument has no drift; it has one
+  mislabelled row.
+- `wide-spread-veto` (n=4, −0.0553, "agent better on every row" per
+  DEEP-2026-08-20) becomes n=5 at ≈ **+0.0072** - neutral, not
+  uniformly agent-better. This row is the spread rule's first settled
+  instance of the veto SAVING money rather than costing it, and the
+  mislabel is what hid it.
+
+One label averaging two mechanisms with opposite settled signs corrupts
+both instruments - the same argument DEEP-2026-08-14 made, recurring a
+month later at ~5x the per-row magnitude. That is why this is a rule and
+not a note.
+
+**Taxonomy addition (DEEP-2026-08-25): `census-consistent`.** A sibling-
+census or cross-market consistency check that finds no signal (ladder
+monotonic, 1X2 sum ≈ 1, no arb) and forms NO independent probability
+estimate must not be labeled `no-edge` — `no-edge` is estimate-bearing
+and reconcile.py check 2 rightly demands a forecast_id for it. Use
+`census-consistent` (estimate-free, like `benchmark-unreachable`).
+Evidence: the 2026-08-25T04:13:41Z funnel line logged the Valencia/Betis
+census check as `no-edge` with the note "no independent estimate formed
+so no forecast row" — reconcile FAILed on it at the 2026-08-25 deep
+retro; two identical mislabels on the 2026-08-22T20:11:00Z line had
+already aged out of the check window unflagged. All three relabeled in
+place (funnel is agent instrumentation with backfill precedent,
+DEEP-2026-08-24). The distinction is load-bearing for the same reason as
+every other taxonomy split here: `no-edge` rows are the clean-feed
+calibration stream; census rows silently mixed in would dilute it with
+entries that never had an estimate at all.
+
+**Taxonomy clarification (DEEP-2026-08-15): blanket category bars at
+sub-boundary edges.** When a category carries a blanket self-model bar
+(contested primaries/elections; social-media-postcount) and a leg's
+claimed edge is ≤0.10, the decline's operative reason is the bar, not the
+numeric veto — label it `category-bar`. `outside-view-veto` stays
+coextensive with the >0.10 boundary (DEEP-2026-08-13), otherwise the
+veto's settled ledger accumulates rows the veto never fired on. Instance
+that prompted this: the 2026-08-15 04:18Z Musk weekly set labeled all 5
+legs `outside-view-veto` though three (70331099597c, c24926a5c9d7,
+7808b6f5a4ef, claimed edges 0.025-0.045) were sub-boundary. Recorded rows
+are immutable (core writes forecasts.jsonl), so the reading rule: at
+settlement those three rows grade the bootstrap model, NOT the veto —
+exclude them from any veto-record claim.
+
+**Coverage weld (DEEP-2026-08-20): recording forecasts and writing the
+funnel line are ONE act, same commit.** A FULL cycle that records any
+forecast MUST append its funnel line before committing — a forecast
+whose cycle has no funnel entry is unauditable for selection by
+construction (no pool counts, no fit scores, no skip reasons for the
+non-forecast declines). Evidence: the 2026-08-19 18:20Z cycle researched
+6 clean-feed candidates, recorded 6 forecasts and spent 4 odds-api
+credits, and wrote no funnel line at all — the window's largest research
+batch has no selection record, and the 3 line-mismatch skips from that
+cycle survive only as prose. Third funnel-coverage defect in three
+windows (schema drift 3-of-7 on 2026-08-18; omission here); the next
+one is a compliance pattern, not an oversight.
+
+**Weld escalated to a mechanical check (DEEP-2026-08-21).** The declared
+"next one" happened twice on the weld's first day in force: the
+2026-08-20 14:27Z (Toulouse/Lyon, e5d0e44532c3 + 9a1c771fd651) and
+18:17Z (MLB h2h, 371aa91ed8bc + 84e1b257aa68) FULL cycles both recorded
+forecasts with no funnel line — five coverage defects in five windows.
+Prose rules have demonstrably not held, so the check is now code:
+**before the commit of any FULL cycle that recorded a forecast, run
+`python3 strategy/tools/reconcile.py` (24h window) and it must print OK.**
+It verifies both directions: every recent forecast id appears in a funnel
+`researched[].forecast_id`, and every estimate-bearing funnel entry
+carries a forecast_id. On FAIL, write the missing funnel line (or the
+missing forecast) in the same commit — committing over a FAIL is a
+discipline violation to be named in the next deep retro. The three gaps
+were backfilled 2026-08-21 from cycle logs (marked `"backfilled"`; the
+18:17Z cycle's third devigged h2h estimate was never recorded anywhere
+and is permanently lost — `"acknowledged"` marks that kind of documented
+unrepairable gap, and using `acknowledged` on a repairable one is itself
+a violation). Pre-weld history (Aug 15–17 box-office and gas-touch
+batches) has known gaps; the check's operating window is 24h precisely so
+old history doesn't drown current compliance.
+
+**Sixth violation, and the token rule (DEEP-2026-08-22).** On the
+mechanical check's first calendar day in force, the 2026-08-21 22:21Z
+cycle committed 9 forecasts (7 MLB h2h + 2 TI esports) with no funnel
+line — reconcile.py was evidently never run before that commit. The
+23:24Z cycle's first reconcile run FAILed, backfilled the line
+same-commit, and flagged it: detection worked within one cycle, exactly
+as designed; prevention (actually running the check pre-commit) did not.
+So the same copy-the-literal-output pattern that ended the cycle-count
+fabrications applies here: **the cycle log line of any FULL cycle that
+recorded a forecast MUST quote reconcile.py's literal output line
+(`OK: funnel<->forecast coverage reconciles over last 24h`); a
+forecast-recording log line without that quoted token is a weld
+violation on its face**, whether or not the funnel line turns out to
+exist. A paraphrase ("reconcile passed") does not count — paraphrases
+are how the count fabrications survived; the literal token is proof the
+command ran.
+
+**Weld wording closed to triggered ticks (DEEP-2026-09-03).** Every
+weld statement above says "FULL cycle", and triggered ticks read that
+literally: the 2026-09-02 22:23Z cycle's reconcile run FAILed with 8
+gaps, five of them forecasts recorded by the 12:32Z/16:25Z/16:39Z
+triggered ticks and the 18:22Z cycle with no funnel line (remediated
+same-commit, 36cc4da, per the weld). The duty follows the forecast, not
+the tick type: **ANY tick that records a forecast — FULL, LIGHT, or
+triggered (`newmarket:`/`pricemove:`) — appends its funnel line in the
+same commit, runs reconcile.py, and quotes the literal OK token in its
+cycle log line.** A triggered tick that researches one market writes a
+one-entry funnel line; "triggered ticks are not FULL cycles" is not a
+reading of this rule, it is the seventh instance of the same defect
+class (see the six above).
+
+**Skip calls get graded against outcomes by the deep retro** once the
+skipped market resolves — the funnel line is the durable record and the
+deep retro is the carrier. (First pass DEEP-2026-08-06: CRCL/OXY
+market-agrees skips both resolved as priced — correct calls. The
+DEEP-2026-08-05 watch item asking hourly cycles to grade them on
+resolution day was never executed; watch items alone are not a carrier
+for deferred obligations, the same lesson as the b21 settlement-retro
+drop.)
+
+**Operational trap (2026-08-15 17:1xZ): `forecast.py record --outcome` takes
+the outcome you name, not "the side I have an opinion about" — a mismatch
+silently records the complement of the intended belief.** Recorded a
+Canada-GDP "less than 0.0%" bracket forecast intending est_prob 0.11 for
+the market's stated Yes side (matches market's own Yes=0.107), but passed
+`--outcome "No"` with that same 0.11 value — the row now reads "I believe
+P(No)=0.11" i.e. P(Yes)=0.89, the opposite of the intended belief, and
+disagrees with market by ~0.78 instead of ~0. Forecast rows are immutable
+(only core writes forecasts.jsonl); this one (fe954ed9f325, market 3388182)
+stays on the books as recorded and will score as a large miscalibration
+when it settles — flag it in that retro as a labeling bug, not a belief
+failure, so it doesn't get read as evidence about econ-bracket calibration.
+Rule going forward: state the target outcome string in the note/reasoning
+BEFORE the CLI call, and sanity-check the returned `mid`/`delta_vs_mid`
+against the intended direction immediately after recording, since the tool
+prints exactly the number needed to catch this before moving on.
+
+**Guard ACTIONED (2026-08-24, DEEP-2026-08-16 proposal):** `forecast.py
+record` now refuses any row where `|est_prob - mid| > 0.40` unless
+`--confirm-extreme` is passed. This catches the fe954ed9f325 failure
+shape (an outcome-label typo silently recording the complement) at the
+only moment it's fixable. It also means genuine outside-view-veto-class
+disagreements (>0.10 claimed edge can still be well under 0.40 mid-gap,
+but a wide one now needs the flag) require `--confirm-extreme` to record
+— expect the first prompt rejection on a real extreme read, don't treat
+it as a bug, just confirm after re-checking the outcome string matches
+intent. fe954ed9f325 itself stays on the books as recorded (forecast
+rows are immutable) — the watch item's manual exclusion at ~Aug28
+settlement is still required, this guard only prevents the next instance.
+
+**Operational trap (2026-08-20 20:1xZ): at step 0, compare `refs/heads/main`
+to `origin/main` — NOT `HEAD`. The container image recurrently starts with a
+detached HEAD and a stale local `main` branch ref.** This cycle: HEAD sat at
+4c2355c (== origin/main, so my equality check passed and I declared the sync
+clean), while `refs/heads/main` was still at ec3eebc, **136 commits behind**.
+Every commit then landed on detached HEAD, and `git push origin main` pushed
+the *branch* — the stale one — and was rejected with "a pushed branch tip is
+behind its remote counterpart". That message names a *behind* condition on a
+repo whose work is strictly *ahead*, so it reads as spurious divergence and
+invites exactly the wrong reflex (pull --rebase, or worse, a reset). CYCLE.md
+step 0 already says to fast-forward when local `main` is strictly behind; the
+failure was checking the wrong ref, not a gap in the procedure. Rule going
+forward: run `git branch -vv` at step 0 — one line shows both the detachment
+and the branch's ahead/behind, which `git log HEAD` cannot. If HEAD is
+detached, reattach BEFORE doing any work (`git checkout -B main origin/main`
+when the stale ref is an ancestor of `origin/main` — verify with
+`git merge-base --is-ancestor`, which is what makes the overwrite provably
+lossless; if it is NOT an ancestor the ref holds unpushed local commits, so
+stop and log for the operator, never `-B` over it). Recovering after the fact
+works the same way (`git checkout -B main <detached-sha>`), but costs a failed
+push and tempts a destructive fix under time pressure.
+
+## Exploration budget (DEEP-2026-08-05, operator mandate)
+
+Selection rules learned only from wins overfit to the categories already
+tried (currently: soccer/MLB book-devig, econ/cross-market). Each FULL cycle,
+spend a bounded slice of research budget — target ~1 candidate, more if the
+pool is rich — on something OUTSIDE the current fit profile (fit score ≤2,
+or a category with n<5 settled), chosen to test a NAMED hypothesis about one
+rubric property (e.g. "weather resolves mechanically; is the benchmark
+actually reachable?"). Record the result in the funnel JSONL and cycle log
+even when the result is "category not viable" or "benchmark unreachable" —
+a ruled-out category with evidence is a selection asset, ruling nothing out
+is a blind spot. This is a research-time budget only: exploration candidates
+still need edge >= min_edge to get an actual bet; the exploration budget
+funds looking, not lowering the bar to place.
+
+**Anti-loophole (DEEP-2026-08-10):** an exploration candidate must test a
+rubric PROPERTY not yet characterized, not a new instance of a
+characterized one. A new league/competition fed through already-measured
+edge machinery does not qualify: the 2026-08-09 21:15Z cycle spent its
+exploration slot on Leagues Cup/Brasileirão 3-way devig via odds.py —
+the same book-devig pipe whose clean-feed profile (~0.00-0.02 edges vs
+tight PM books) was already confirmed across ~40 devigged markets over
+the prior 3 days — and predictably re-found the known result. Contrast
+the 08-09 05:15Z weather probe (new property: "official forecast JSON as
+benchmark — reachable? resolvable?"), which is the intended shape. Before
+charging a candidate to the exploration budget, name the property being
+tested and why existing evidence doesn't already answer it.
+
+## Market selection
+
+**Scan horizon (OPERATOR EDIT 2026-08-03, see journal/operator-notes.md):**
+default to
+`python3 core/scan.py --hours 168 --min-volume-24h 0 --min-total-volume 50000`.
+The `--min-total-volume` flag is new (operator patch to core/scan.py, same
+date) and is REQUIRED to see past today: results page in endDate order and the
+near-term universe is thousands of sub-daily markets deep, so `--hours` alone
+never escapes the current day — verified, 1004/1004 candidates were day-0.
+With the flag, the same scan surfaces ATP/WTA main-draw tennis 5–7 days out
+(liquidity $200k–460k), central-bank decisions, and countable-metric markets.
+Do NOT also apply a 24h-volume floor on a weekly window: an event five days
+out legitimately has little volume today, so that filter re-creates the bug.
+Evidence for all of this: 19 straight no-bet cycles on 2026-08-02/03. The 48h
+window structurally selects for
+whatever clears the volume filter *soon* — Icelandic, Argentine second-tier
+and lower-league fixtures — which are exactly the events with no searchable
+sharp benchmark, so research fails and no bet is possible. Well-covered
+events (major European leagues, MLB/NBA/NFL/WNBA, big esports finals,
+scheduled earnings and macro releases) mostly sit 2–7 days out. Longer
+horizon also means slower feedback; that is an accepted cost, since feedback
+is already gated by resolution lag, not by bet frequency. Revisit if the
+weekly window produces placements without improving hit quality.
+
+**Coverage precondition (OPERATOR EDIT 2026-08-03):** before spending research
+effort on a candidate, spend ONE search establishing whether a sharp benchmark
+is retrievable at all (a real bookmaker line for this exact market, an analyst
+consensus, an official schedule/print). If nothing sharp is retrievable, drop
+the candidate immediately and move on — do not build an estimate on aggregator
+"prediction model" numbers. Scraping consumer odds portals directly does not
+work from the cloud runner: forebet/oddsportal/oddspedia 403 datacenter IPs
+(this is site-level bot blocking, NOT the sandbox egress policy — the earlier
+"recurring egress block" diagnosis in cycle logs was wrong). WebSearch results
+do work; use them. Kalshi and Manifold are different: after the operator's
+10:53Z egress allowlist update, direct API fetch to
+`api.elections.kalshi.com` and `api.manifold.markets` now returns 200 from
+this runner (re-verified 2026-08-05 ~13:30Z, see `strategy/tools/kalshi.py`)
+— use the direct fetch, it's cheaper and more precise than WebSearch.
+Metaculus (`www.metaculus.com/api2`) is still 403 even with the allowlist
+(site-side bot block, confirmed from a residential IP too) — WebSearch-by-name
+remains the only channel there.
+
+**Odds-API integration (2026-08-08, operator-notes re-open):** `core/odds.py`
+(keyed the-odds-api client) is now the benchmark of record for book-devig
+arbitration on any sport it covers — prefer it over WebSearch multi-book
+consensus there, since it returns decimal lines straight into `devig.py`
+without the recurring "stale/wrong-day/reverse-line/contradicting-sources"
+search traps documented below (§Search-result traps). Rules for spending it:
+1. **Discovery order, not discovery source.** Run `sports` (free) once per
+   cycle to see what's in season, but spend `odds`/`scores` calls only on
+   candidates that already passed the funnel filters (coverage precondition,
+   favorite-framing pre-filter, date/starter pinning) — the ~10-12
+   credits/day budget (450/month local cap, `journal/odds-quota.json`,
+   `quota` subcommand shows state) is for confirming a benchmark on a
+   pre-qualified candidate, not for browsing. The 10-minute cache makes
+   within-cycle re-checks free.
+2. **`min_edge_book_devig` (0.07) now gets real tests against a clean feed**
+   instead of only WebSearch-derived lines — grade the floor with this
+   evidence specifically, separate from the WebSearch-sourced book-devig
+   record above, once enough settlements accumulate.
+3. **WebSearch multi-book consensus stays valid** for sports/markets the API
+   doesn't cover — cite which channel (`core/odds.py <sport_key>` vs.
+   WebSearch) the rationale used, so retros can tell them apart.
+4. **Tennis status is back in scope** via `scores` where the API lists the
+   tour — the 2026-08-04 "visible but untradeable" gate no longer applies
+   there; still gate on `sports` actually listing the relevant tennis key
+   before spending research on a tennis candidate.
+If the key is missing or the budget is exhausted, `core/odds.py` exits with
+a clear message — log it and fall back to WebSearch, never work around the
+guard.
+5. **Confirmation-sweep cap (DEEP-2026-08-10).** The clean-feed finding is
+   now CONFIRMED, not provisional: across 3 days and ~40 devigged markets
+   (MLB -1.5 slates 08-09 08:15Z/11:15Z/14:19Z/04:16Z, WNBA h2h+spreads,
+   Leagues Cup/Brasileirão 3-way), every power-devig edge vs a tight PM
+   book landed in 0.000-0.020 — under even min_edge, nowhere near
+   min_edge_book_devig. Re-demonstrating this daily is cheap in credits
+   (cache) but not in research minutes: the 14:19Z cycle re-ran the same
+   slate researched 3h earlier to "confirm unchanged". Cap: at most ONE
+   sports devig confirmation sweep per day, and only when the slate's
+   composition actually changed (new games, not the same games re-checked);
+   log it as `cheap-confirmation`, not research. The marginal research
+   minutes go to independent-benchmark candidates (econ prints, polls,
+   countable metrics) — the only stream that generates scoreable
+   disagreements (see Forecast ledger, below).
+   **Cap tightened DEEP-2026-08-13: at most ONE sports devig confirmation
+   sweep per WEEK per feed, as a drift spot-check.** The daily cap's own
+   evidence condition is met and exhausted: mlb-spreads settled forecast
+   n=21 at brier_delta -0.0003, stable across three consecutive slates
+   (n=12 → 18 → 21, delta -0.0003/-0.0004/-0.0003; RETRO-20260813-0211
+   and -0311 are the second and third confirmations). Every additional
+   at-market row adds ~zero information about the only open question
+   (disagreement calibration) while spending odds credits and research
+   minutes. A weekly one-slate spot-check is enough to detect feed drift;
+   anything more is re-demonstrating a solid null. If a spot-check ever
+   shows a clean-feed edge ≥ min_edge on a tight book, that is NEW
+   information — revert to daily sweeps and say why.
+   **Granularity loophole closed (DEEP-2026-08-21): the weekly cap is per
+   CHANNEL (the odds-api/multi-book power-devig-vs-tight-PM-book method),
+   not per league or market subtype.** The 2026-08-20 window ran the
+   compliant weekly MLB sweep (02:17Z) and then four more clean-feed devig
+   confirmations in one day by treating each new fixture or sub-market as
+   fresh research: La Liga 3-leg (10:34Z), Ligue1 2-leg (14:27Z), MLB h2h
+   3-leg (18:17Z), MLB/WNBA h2h (22:18Z). Every one confirmed the same
+   null the channel has confirmed at n=132 settled no-edge forecasts,
+   brier_delta −0.0004 — dead flat by construction. Sub-slicing (soccer →
+   La Liga → Ligue1; mlb-spreads → mlb-moneyline) lets every day be a
+   "first instance" of something; that is the pre-2026-08-13 daily-sweep
+   behavior wearing a new label. Rule: a new league/market-subtype on this
+   channel counts as EXPLORATION for its first ~2 instances only when the
+   funnel entry names the hypothesis being tested (e.g. "is NFL preseason
+   pricing looser than regular season?" — a real question; "does the
+   clean-feed null also hold for Ligue1?" — not one, the null is the
+   channel's property, not the league's). After that it folds into the
+   ONE weekly confirmation sweep, which may mix leagues. The freed FULL-
+   cycle research minutes go where the open questions actually are:
+   mechanical-econ (PCE/BoK/GDP cluster), countable metrics, cross-market
+   arithmetic, and the tags.py exploration pass.
+   **Gate before spend (DEEP-2026-08-22): the weekly-cap gate is checked
+   BEFORE any odds.py call, not after.** The 2026-08-21 22:21Z cycle
+   devigged a 7-game MLB h2h slate and only then noticed the week's sweep
+   was already spent (2026-08-20 02:17Z) — 4 credits and a research slot
+   on a null settled at n>21 for this channel; the resulting rows settled
+   flat overnight exactly as the channel stats predicted (mlb-moneyline
+   n=10, delta −0.0011). The log named the slip unprompted, which is the
+   right failure mode — but the gate is one grep against the cycle log
+   and costs nothing; run it first. If devig output already exists when a
+   violation is noticed, still record the forecasts (honesty rule: an
+   estimate formed must be scored), and the cycle log must name the slip,
+   as 22:21Z did.
+
+**Home-anchored spread mismatch (TRIGGERED 2026-09-02 09:56Z, `newmarket:4117420`):**
+PM always creates its primary MLB spread market keyed to the HOME team at
+-1.5 (`mlb-<away>-<home>-...-spread-home-1pt5`), regardless of which side
+sportsbooks actually favor. `core/odds.py odds <sport> --markets spreads`
+only returns the near-pick'em line — whichever side the market treats as
+favorite — not both directions; `alternate_spreads` 422s (not on this
+plan's tier). When the home team is NOT the moneyline favorite (this
+game: PHI@ARI, devigged moneyline had Phillies 0.508/ARI 0.492, so
+sportsbooks quoted Phillies -1.5 / ARI +1.5, never ARI -1.5), the clean
+feed cannot benchmark PM's home-anchored market at all — splitting a
+team's total win probability into "wins by 1" vs "wins by ≥2" needs a
+run-differential model this playbook already vetoes as a self-built
+Gaussian (see outside-view veto). The direct, benchmarkable match is
+always the SIBLING "Spread: `<favorite>` (-1.5)" market
+(`strategy/tools/siblings.py <id>` finds it in one call) — that sibling
+re-confirmed clean-feed-null as usual here (4112867 priced 0.395 vs
+devigged sportsbook 0.402). Rule: on a newmarket trigger for a PM
+home-anchored MLB/WNBA spread, check the moneyline devig first; if home
+isn't the favorite, log `benchmark-unreachable` immediately rather than
+spending a devig call on the wrong-side market — the favorite-side
+sibling is where the real (usually null) signal lives.
+
+**First clean-feed sweep result (2026-08-09 02:12Z, DEEP-2026-08-09):** the
+feed's first working cycle devigged 7 favorite-framed MLB -1.5 spreads and 2
+WNBA markets (2+2 credits, 9 books deep): max nominal edge **0.018** at the
+mid (MLB, Pirates), 0.025-0.035 (WNBA) — all under base min_edge 0.04, let
+alone min_edge_book_devig 0.07. Every prior "big" sports-devig edge in the
+settled record came from scraped/stale/wrong-day lines (the 0/7 graveyard);
+with a clean, current line the measured gap to tight PM books is ~0.02.
+Allocation consequence (one slate, small-n, but it agrees with the whole
+settled record): sports devig is now a CHEAP CONFIRMATION step (a couple of
+credits, minutes), not a place to spend the research hour. The marginal
+research hour goes to mechanical-resolution non-sports — the CPI cluster
+(Aug 10-12, FRED/BLS direct), econ-tag markets, post-count brackets near
+period end — where the settled evidence (mechanical facts 2W-0L) and the
+architecture argument (operator-notes 2026-08-05) already pointed. Run the
+sweep, log it, move on; a sports bet now needs the feed to hand you ≥0.07
+on a current line, which day 1 suggests is rare.
+
+**Cloud-runner caveat (found first cloud use, 2026-08-08 ~22:1xZ):**
+`api.the-odds-api.com` is EGRESS_BLOCKED from the cloud runner specifically
+— both urllib and the curl fallback get `CONNECT tunnel failed, response
+403` from the sandbox proxy, distinct from a "key not provisioned" exit or
+an API-side 401/422. Check which failure you got before logging: a clean
+`sys.exit` naming the key/budget is the guard working as designed; a
+`Tunnel connection failed`/`curl: (56)` traceback is the egress block —
+log "odds EGRESS_BLOCKED (cloud runner)" and fall back to WebSearch, same
+as the clevelandfed.org/macromicro.me pattern above. Filed as a proposal
+(journal/proposals.md 2026-08-08) — re-check `sports` each cycle in case
+the allowlist changes.
+
+**Sensing addition (DEEP-2026-08-05):** `strategy/discovery.py` query 4
+("econ-tag", gamma `tag_id=100328`) targets Polymarket's Economy tag with no
+volume floor — Fed-rate-decision and GDP-bracket markets that resolve off an
+official print/vote, the fact-finality profile the settled evidence favors,
+but that queries 1-3's volume/liquidity ordering buries under sports. Check
+its yield in scan's stderr each cycle; if it stays empty for several cycles
+running, that is itself worth a cycle-log note (query 1 already put these
+markets in front of everyone, in which case query 4 is redundant, not
+broken).
+
+**Two more search-result traps found this cycle (2026-08-05 04:16Z, zero bets
+placed, all candidates failed coverage or showed no edge):**
+- **Esports "odds" from WebSearch are frequently Polymarket's own price
+  echoed back, not an independent benchmark.** Searches for LCK/LPL/Dota
+  matchup odds returned pages titled "... Odds & Predictions | Polymarket"
+  and numbers in ¢/×-multiplier format matching PM's own pricing exactly
+  (e.g. "JD Gaming favored at 1.35x (74¢)" — 74¢ is a PM price, not a
+  sportsbook line). Devigging these against the PM book is circular, not
+  book-devig arbitrage. Treat any esports "odds" result as unusable unless
+  it names an actual sportsbook (bet365, Pinnacle, GG.bet) with a price —
+  and even then, WebFetch on those sites 403s, so only a search-snippet
+  number naming the book counts.
+- **Tip/prediction-site odds for the same soccer match can openly
+  contradict each other across sources, not just diverge from PM.** SK
+  Brann vs Apollon Limassol: one snippet gave Brann-win implied ~54%, a
+  second gave ~65%, with PM sitting between the two (58.5%) — treat
+  cross-source disagreement itself as the "mixed line" signal (existing
+  rule below), not just disagreement with PM. Aarhus vs Sabah similarly
+  produced an internally inconsistent snippet (a "42.6%" figure paired
+  with odds of 1.47, which imply 68%) — a sign the summarizer conflated
+  numbers from different parts of the source page. Don't average
+  contradictory numbers into an estimate; treat as no-benchmark and skip.
+- **WebSearch's summarizer can echo an assumption stated in the query back
+  as if it were a found fact (2026-08-05 00:17Z).** Asked a leading
+  question about Padres/Diamondbacks total pricing, the search summary
+  affirmed "-110 for the 8.5 total... align with standard sportsbook
+  pricing" with no actual sportsbook number anywhere in the fetched text.
+  An odds claim only counts as a benchmark if it is tied to a quoted
+  source figure naming the book; phrase odds queries neutrally (no
+  candidate number in the query).
+
+**Three more traps found this cycle (2026-08-05 21:16Z — exploration-budget
+weather test + econ re-check + soccer 1X2, zero bets placed):**
+- **Weather: mechanical resolution does not imply a reachable point
+  benchmark.** Exploration-budget test of the operator's own example
+  hypothesis ("weather resolves mechanically; is the coverage there?") on
+  Hong Kong Aug-6 highest-temperature brackets (PM implied distribution
+  peaking ~33°C across the 32-35°C bracket set). Two forecast sources gave
+  materially different numbers for the same nominal date: Hong Kong
+  Observatory's own 9-day forecast (the market's stated resolution source)
+  said 26-31°C (max 31°C), AccuWeather (Sha Tin station, not confirmed as
+  the same station HKO uses for the official reading) said 93°F ≈ 34°C — a
+  3°C spread, wider than the 1°C bracket width the market is priced on, with
+  station identity unconfirmed on top. Resolves the "mechanical resolution"
+  rubric property Yes but "benchmark reachable" No: treat as a
+  contradictory-source skip (existing rule), not an edge — the forecast
+  disagreement is bigger than the thing being priced. Also corrects
+  `discovery.py`'s comment: climate-weather tag 1474 was empty on
+  2026-08-05, but general volume/liquidity queries surface ~79 weather
+  markets independent of that tag (city-temperature brackets, $2-19k
+  liquidity) — tag 1474 being empty does not mean the category is absent
+  from the pool.
+- **WebSearch can surface a PRIOR year's already-released actuals for a
+  still-upcoming release when the query doesn't pin the year tightly and
+  the event name recurs annually.** Searching for the July 2026 US jobs
+  report (due 2026-08-07, not yet released) returned an fxstreet article
+  (URL-dated 2025-08-01) describing that year's July jobs report as already
+  landed (unemployment 4.1%→4.2%, payrolls +73k) — i.e. July 2025 actuals,
+  not a 2026 forecast, surfaced by a query that said "July 2026" but didn't
+  stop the summarizer from matching on "July jobs report" generically.
+  Caught here because the numbers read as settled/past-tense for an event
+  that hasn't happened; a less careful read could log stale-year actuals as
+  current consensus. Cross-check any scheduled-release search result's
+  implied publish date against the event's actual date before using it —
+  don't trust the query's own year framing to have filtered correctly.
+- **Same trap, multi-game-series form: WebSearch for "today's" run line odds
+  on a series opener/finale skews toward the PRIOR game in the series, and
+  favorites can flip game-to-game (different starting pitchers) — no bet
+  placed, caught before placement (2026-08-08 02:13Z).** Scanned 5 same-day
+  MLB spread candidates (NYY-1.5, WAS-1.5, ARI-1.5, CLE-1.5, TEX-1.5/-2.5),
+  all part of 2-3 game series. Initial searches for "run line odds August 8"
+  returned articles explicitly dated/framed for August 7 (one snippet even
+  said outright "the game was played on August 7"), not the still-upcoming
+  Aug 8 game the PM market resolves on. Devigging that stale line against
+  today's PM ask produced an apparently huge edge (~0.10-0.14) on NYY-1.5 and
+  WAS-1.5 — but a follow-up search pinned to the correct date and probable
+  starters (Braves' Aug 8 starter, Reds' Chase Burns vs Nationals' Alvarez)
+  showed the FAVORITE HAD FLIPPED both games: Atlanta (not Yankees) and
+  Cincinnati (not Washington) were the correct day's -1.5 favorites. The
+  "edge" was an artifact of benchmarking against the wrong game entirely,
+  not a real mispricing — and even the corrected line was unusable, since it
+  only quotes the actual favorite's -1.5 side (Braves/Reds), leaving PM's
+  underdog-framed market (Yankees/Nationals -1.5) with no matching book
+  quote (reverse-line-mismatch trap, existing rule). Rule: for any series
+  game, confirm the search result's date AND probable starting pitcher names
+  match the specific game the PM market resolves on before devigging —
+  "today" in a query is not enough to prevent the summarizer surfacing the
+  most recent (usually prior) game in the same series. Treat an unconfirmed
+  game-date/pitcher match as benchmark-unreachable, not as license to use
+  the nearest available number.
+- **Odds-comparison sites report "best odds" shopped per side across
+  different bookmakers, not one book's coherent line — devigging that
+  composite is a version of the cross-book-mixing trap** (first named in
+  schedule.json 2026-08-05 17:19Z re: Fenerbahce/Sturm Graz, now formally
+  in the playbook). Boca Juniors vs Estudiantes 1X2: "best odds" search
+  summary gave Boca 2.15 (one book), draw 3.15, Estudiantes 4.01, but a
+  second passage in the same result gave Boca 2.22 at Betsson and draw 3.05
+  at Betsson — different books' best-per-side numbers stitched together
+  don't represent a single market's true vig or fair prices. Devigging it
+  anyway produced a marginal ~0.06 edge on Boca-No, under min_edge_book_devig
+  (0.07) regardless, but the number shouldn't be trusted even if it had
+  cleared: require a single named book's full multi-way quote (not a
+  "best odds across bookmakers" aggregation) before devigging a 3-way line.
+
+**Weather exploration budget, round 2 (2026-08-06 06:25Z) — even the single
+official source can disagree with itself.** The 2026-08-05 Hong Kong test
+found two different sources 3°C apart. This round tested a well-instrumented
+US station (Atlanta/KATL, official NWS gridpoint forecast, `3350823-26`,
+4 brackets 84-91°F) on a day with afternoon thunderstorms forecast. NWS's
+OWN forecast text gave "high near 90, falling to around 86 in the
+afternoon" — a 4°F intraday spread inside ONE official product, before even
+counting the ~83-88°F spread across secondary aggregators. On
+convective/storm days, "mechanical + official source" is still not
+"point-precise enough for 1-2°F brackets" — the uncertainty is physical
+(storm timing), not a sourcing problem, so a second corroborating source
+won't fix it the way it does for e.g. earnings consensus. Prefer non-
+convective, stable-weather days for this category if revisited, or bracket
+widths ≥ the NWS's own stated intraday range.
+
+**Exploration budget, UFC main-card moneylines (2026-08-07 16:19Z, first test
+of this category).** Hypothesis: "UFC main-card moneylines have dense enough
+multi-book sportsbook coverage to devig, and PM either lags or tracks them
+loosely enough to leave edge." Gamrot vs Salkilld (UFC Vegas 120, >24h
+pre-fight): three independent books (DraftKings, FanDuel, opening line) agree
+on favorite and magnitude; power devig (DraftKings) gives Salkilld fair 0.567
+vs PM mid 0.575 — within 0.008. Result: **reachable** (multi-book UFC
+moneyline coverage is a normal WebSearch hit, unlike the esports-echo trap)
+but **no edge** this instance — PM tracks the sportsbook consensus tightly.
+Category ruled in, not out; single-book UFC prop markets (KO/TKO, distance)
+are a distinct, untested benchmark question — do not assume the same result
+transfers to those without checking.
+**Second test (2026-08-08 08:15Z), UFC 330 Makhachev vs Machado Garry
+(main event, 7 days pre-fight):** multiple books agree closely (FanDuel
+-390/+280, DraftKings -325/+240, two other sources -335/+275,+300) —
+reachable confirmed a second time. DraftKings power devig: Makhachev fair
+0.7426, Garry fair 0.2574; PM live ask Makhachev 0.76, Garry 0.25 (spread
+0.01) — edges -0.017 and +0.007, both under min_edge. Same result as the
+first test: reachable, tight, no edge. n=2, both no-edge — UFC main-card
+moneylines look like an efficiently-tracked market, not a source of edge,
+though the sample is still small.
+
+**Exploration budget, Dota 2 esports moneylines (2026-08-20 06:2xZ, first
+test since the 2026-08-05 esports-echo trap was named).** Hypothesis
+(flagged as an open candidate 2026-08-20 02:17Z, thick TI books $130-390k
+liquidity, no benchmark attempted): does odds-api or WebSearch multi-book
+coverage exist for The International? odds-api's `sports` list has zero
+esports keys (checked live, no `dota`/`csgo`/`lol` entries) — that channel
+is closed for this category. WebSearch, however, cleared the esports-echo
+check this time: results named actual books (Spinbetter explicitly, plus
+an aggregator average) with decimal odds distinct from PM's own price
+(e.g. Team Liquid vs Team Yandex: books averaged 1.732/2.014 vs PM ask
+implying 1.786 — close but not identical, unlike the 2026-08-05 "74¢ ×
+1.35" echo where the odds number literally was the PM price). Two
+pre-match TI quarterfinals power-devigged clean: Liquid/Yandex edges
+-0.018/+0.008, Nigma/Falcons edges -0.043/+0.033 — both pairs well under
+the 0.07 book-devig floor, both PM books 0.01-spread, $150-215k liquidity.
+Result: **reachable** (multi-book esports coverage exists via WebSearch
+odds-comparison aggregators, same channel as UFC) but **no edge** — PM's
+thick TI books track the sportsbook consensus as tightly as MLB/soccer/
+WNBA/UFC do. Category ruled in for future book-devig research, not out;
+still bound by the existing esports pre-match-only rule (Market selection
+§3) — a third TI match in the same event was already in-play at check
+time and was correctly declined without forming an estimate. Always
+verify any esports odds snippet names a real book with a price
+distinguishable from PM's own before devigging — the echo trap is
+per-search, not per-category, and does not go away just because one
+search cleared it.
+
+**Third moneyline test + first props test (2026-08-16 00:21Z), same
+Makhachev/Garry fight, ~3.7h pre-fight via odds.py's clean feed:** h2h
+power devig 0.7585/0.2415 vs live ask 0.74/0.27, edges +0.0185/-0.0285 —
+n=3, still no-edge, the class stays efficiently-tracked even this close to
+first walk. **Exploration budget, single-book method-of-victory props
+(first test, named property: does UFC prop coverage have complete
+single-book lines the way moneylines do?):** WebSearch surfaced DraftKings
+decision/submission odds for both fighters (Makhachev Dec +120/Sub +200,
+Garry Dec +450/Sub +3300/KO +1100) but Makhachev's own KO/TKO price was
+never quoted by DraftKings in any result — only a FanDuel range (+850/+950)
+that the source itself flagged as merely "expected to be similar" on DK,
+not an actual DK number. Completing the 6-way distribution would require
+substituting a different book for the one missing leg, which is the
+cross-book-mixing trap (Boca/Estudiantes precedent) applied to a prop
+market instead of a 1X2. Declined rather than mix; **result: UFC props are
+only PARTIALLY single-book-coverable from WebSearch (2 of 3 methods per
+fighter found on one book, the KO/TKO leg missing) — treat any UFC
+method-of-victory candidate as benchmark-unreachable unless a single
+source quotes all methods for both fighters from the same book.**
+
+**Exploration budget, ATP/WTA tennis moneylines (2026-08-14 09:1xZ, first
+test of this category).** Hypothesis: same shape as UFC-moneyline — dense
+multi-book coverage (the-odds-api `tennis_atp_cincinnati_open`/
+`tennis_wta_cincinnati_open`, 5-8 books per match) might leave PM lagging or
+loose. Three Cincinnati Open matches today, all high-liquidity ($71k-$79k):
+Royer/Tsitsipas (8 books, power devig fair 0.231/0.769 vs PM ask 0.24/0.77,
+edges -0.009/-0.001), Machac/Carreno Busta (8 books, fair 0.523/0.477 vs PM
+ask 0.53/0.48, edges -0.007/-0.003), Zandschulp/Griekspoor (8 books, fair
+0.516/0.484 vs PM ask 0.52/0.49, edges -0.004/-0.006). Result: **reachable**
+(dense book coverage confirmed, same as UFC) but **no edge** on any of the
+6 sides across 3 matches, all |edge| < 0.01 — PM tracks the devigged
+consensus about as tightly here as on UFC and MLB. Category ruled in, not
+out (n=3 matches, all no-edge, same efficient-market pattern as every other
+liquid PM sports book tested so far); revisit only if a lower-liquidity or
+in-play match shows a wider gap.
+
+**Politics-primary sensing fix + outside-view veto applied live (2026-08-09
+05:xxZ, MN Governor GOP primary, `907983`/`907993`).** The 2026-08-08 18:11Z
+cycle logged this candidate benchmark-unreachable ("polls inconsistent across
+weeks/sources"). Re-checked with `predictionedge.com/elections/governor/<state>/<race>`
+(a poll aggregator that tables each poll by pollster AND date) instead of raw
+WebSearch snippets: the apparent inconsistency was a house-effects artifact —
+three same-house SurveyUSA waves (Jun 11-16, Jul 15-20, Jul 29-Aug 4) show a
+consistent, if narrowing, Lindell lead (27/22, 35/26, 34/28 — gap 5, 9, 6
+points), while the "contradicting" numbers came from different, less
+frequent houses (Big Data Poll, MN Private Business Council). **Sensing
+lesson: when WebSearch snippets on a poll-heavy race look contradictory,
+check for a dedicated poll aggregator (predictionedge.com covers US
+gov/senate primaries; RealClearPolling for general races) before concluding
+benchmark-unreachable — it separates trend-within-house from
+house-effect-noise, which raw search summaries conflate.** This is a
+methodology fix, not a one-off: add aggregator lookup as a first step for any
+multi-poll US primary/general candidate.
+Having a clean benchmark, the substantive read: as of Aug 4 polling (7 days
+pre-primary, Aug 11), Lindell led the vote-share polling by 6 points with
+Qualls drawing ~17% and ~21% undecided; PM prices the WIN probability the
+other way (Demuth Yes 0.565 vs Lindell Yes 0.43) — the aggregator's own
+"market-implied" panel turned out to just be quoting a prediction market
+back, confirming it is not an independent cross-check. **Declined to bet
+despite a >0.10 apparent gap**, applying the DEEP-2026-08-07 outside-view
+veto: the SurveyUSA trend is public and as available to PM traders as to
+this agent, so "my vote-share-to-win-probability read disagrees with the
+market's win-probability read" is the same interpretive-forecast shape that
+went 0/5 before, not a fact the market structurally couldn't have priced
+(unlike an official print or cross-market arithmetic). Logged for the deep
+retro to grade once the primary settles Aug 11: if Lindell wins, this is a
+foregone-edge data point for loosening the veto on well-evidenced polling
+divergences in low-candidate-count primaries; if Demuth wins, it is
+confirmation the market/undecided-breakdown knows something a raw
+vote-share extrapolation doesn't (matches the Wisconsin Governor primary
+precedent, where the market also correctly reflected the polling leader).
+
+**Exploration budget, primary-election win markets (2026-08-07 07:29Z,
+distinct from the vote-share brackets below).** Hypothesis: "named-pollster
+averages (not just single polls) are a reachable benchmark for primary
+win-probability markets close to the vote." Wisconsin Governor Democratic
+primary (2026-08-11): two independent named-pollster results (Marquette,
+Main Street Action) into early August both show Francesca Hong leading
+David Crowley by a wide, stable double-digit margin (38-44% vs 7-15%). PM
+prices Hong Yes=0.921, Crowley Yes=0.08 — consistent with a dominant,
+stable leader this close to the vote. Result: **reachable** (named-pollster
+averages are a normal WebSearch hit for any actively-polled primary) but
+**no edge** this instance — market already reflects the polling lead.
+Category ruled in (not out): revisit closer-margin primaries, or ones
+without recent, WebSearch-findable pollster figures, before generalizing
+further.
+
+**Exploration budget, social-media post-count brackets (2026-08-09 02:1xZ,
+first test of this category).** Hypothesis: "post-count resolution is
+mechanical AND the running count is published live by the resolver itself,
+not just estimable" — a stronger reachability claim than any prior category
+tested. Confirmed: Polymarket's stated resolution source for "Elon Musk #
+tweets <period>?" markets is `https://xtracker.polymarket.com`, and its
+public REST API (no auth) exposes the exact running count — `GET
+/api/users/elonmusk?platform=x&stats=true` lists every open tracking period
+by id, then `GET /api/trackings/<id>?includeStats=true` returns hourly
+`daily` counts plus a `cumulative` total for that period. Tested on the
+"August 4 - August 11" bracket set (PM brackets: 160-179 Yes=0.135, 180-199
+Yes=0.385, 200-219 Yes=0.285, 220-239 Yes=0.095): at query time (4.42 days
+of 7 elapsed) cumulative was 126, i.e. ~28.5/day; the API's own `pace` field
+(176) is misleading — it divides by `daysElapsed` (5, apparently ceil'd),
+not actual elapsed time, understating the run rate. The correct linear
+extrapolation (126/4.42*7 ≈ 200) lands almost exactly on PM's 180-199/200-219
+boundary, where PM already puts its two largest buckets (67% combined) —
+**reachable (exact live source) but no edge**: PM's distribution already
+tracks the true pace closely once you extrapolate correctly, and per-day
+counts are volatile enough (18-37 across 4 observed full days) that no
+single 20-wide bracket clears min_edge against that noise. Category ruled
+IN as viable (the API is a stronger benchmark than anything else tested —
+exact, live, resolver-authoritative) — worth rechecking near the end of a
+period when daysRemaining is small (less extrapolation variance) or on a
+bracket set whose current pace sits further from PM's mode than this one
+did. **Caveat for reuse:** always compute pace from `cumulative / actual
+elapsed days` yourself; do not trust the API's own `pace` field, which
+undercounts a still-running partial day as a full one.
+
+**Fat-tail mechanism found on near-end recheck (2026-08-13, RETRO-20260813-1707,
+no forecast filed — both prior open forecast rows on this event, `b7a58fd571c8`
+et al. from 2026-08-12, blocked a duplicate).** A Gaussian model of the
+running count (mean from elapsed-days pace, sd from the daily-count series)
+systematically UNDERSTATES the right tail relative to the market: on the
+Aug7-14 Musk event at 23h remaining (cumulative 138, model N(159.74, 7.85)),
+the model gave the 180-199 + 200-219 brackets combined ~0.6% while the book
+(siblings.py, sum_check 0.9875 — a well-calibrated book) priced them at
+8.85% combined. This isn't noise-sized: it's an order of magnitude, and it's
+directional (Gaussian always under-weights tails vs. any real bursty count
+process — a single high-volume posting day, retweet storm, or news-driven
+spike). Consequence: the model's claimed edge on the modal brackets
+(140-159 here, edge 0.133 vs the veto's 0.10 boundary) is inflated by the
+same mechanism that starves the tail — probability mass the Gaussian denies
+the tail has to go somewhere, and it lands in the bulk brackets, manufacturing
+a fake edge there even when the true mean estimate is fine. This is the
+same "large claimed edge in an efficient, information-rich market = modeling
+gap, not alpha" pattern as the SPX Brownian-bridge case, now with an
+identified mechanism specific to this category: **do not use a plain
+Gaussian for these brackets near a boundary; either fatten the tail
+(mixture, or empirical bootstrap off the observed daily-count series) or
+treat any Gaussian-derived edge here as presumptively overclaimed and route
+it through the outside-view veto regardless of nominal size.**
+
+**Graded (DEEP-2026-08-14): the prediction above settled correct within
+12 hours.** Both of the model's center-mass brackets resolved No — 120-139
+(5ef2f363f039, est 0.165, RETRO-20260813-2130) and 140-159 (b7a58fd571c8,
+est 0.64, the model's modal bracket, RETRO-20260814-0045). Together those
+two legs carried ~80% of the Gaussian's probability mass; the count landed
+above both, i.e. in exactly the right tail the model starved. Two
+same-model, same-direction misses on the highest-mass legs is a mechanism
+confirmation, not variance. The open 160-179 (market 0.385 vs model 0.189)
+and 180-199 (0.095 vs 0.003) rows grade the market's side of the same
+comparison at settlement.
+
+**Graded again (2026-08-14 09:05Z, RETRO-20260814-0905): 160-179 also
+settled No** (e06e9b2bea70, est 0.189). n=3 now, all same model instance,
+all same direction — the count has landed above every bracket checked so
+far, tracking the market's fatter-tail pricing rather than the Gaussian's.
+
+**Fully graded (2026-08-14 19:16Z, RETRO-20260814-1916): 180-199 settled
+Yes** (eb09f3632c5d, est 0.003) — the true count landed in 180-199 itself,
+the exact bracket the Gaussian starved to 0.3%, not the 200+ tail beyond it.
+All four same-model siblings on this event are now settled (120-139 No,
+140-159 No modal-bracket miss, 160-179 No, 180-199 Yes), same direction
+throughout: a plain elapsed-pace Gaussian is confirmed unusable for this
+category's tail brackets (est 0.003 vs. an outcome the market's own book
+priced around 9.5%) — not a one-off, a repeatable mechanism. The outside-view
+veto correctly blocked a bet on this leg pre-settlement; no ledger loss. n=4
+is still below the ~15-settlement floor-change threshold, so no numeric
+min_edge change yet, but the modeling requirement (fatten the tail — mixture
+or empirical bootstrap off the observed daily-count series — before trusting
+any Gaussian-derived edge on this category's outer brackets) is now
+confirmed rather than provisional. This event's sibling set is closed out;
+next test is a fresh event/pace, not a re-check of this one.
+
+**Test in progress (DEEP-2026-08-15, pre-registered reading).** The
+2026-08-15 04:18Z cycle ran the required bootstrap (14-day empirical
+daily-count resample) on two fresh events: the Aug11-18 weekly set (5
+rows, 70331099597c…cf16f6424af7) and the first 2-day window Aug13-15
+(10029a75295e, 53c5bf348303 — settles ~Aug 15 16:00Z; weekly settles Aug
+18 16:00Z). The bootstrap still disagrees with the market by >0.10 on two
+weekly legs (180-199 est 0.494 vs 0.325; 220-239 est 0.024 vs 0.145).
+Reading committed BEFORE settlement: if the market again beats the model
+on the large-disagreement legs, the verdict escalates from "wrong tail
+shape" (fixed by the bootstrap) to "self-model class untrustworthy in
+this category at any model sophistication" — i.e. a permanent category
+bar like contested primaries, forecast-only. If the bootstrap materially
+beats the market on those legs, the Gaussian, not the class, was the
+problem, and the category stays estimate-bearing under the veto. Grade
+same-tick at each settlement against exactly this fork.
+
+**Fork settled, mixed (2026-08-18 18:16Z, RETRO-20260818-1816).** Both
+decisive legs are in. 180-199 LOST (model brier 0.244 vs market 0.106 —
+market beat the model by 0.138 on the modal bracket, the model's single
+most confident prediction in the set). 220-239 WON (model brier 0.0006 vs
+market 0.021 — model beat the market by 0.020). Net over the two legs:
+brier delta −0.118, market ahead in aggregate, but driven almost entirely
+by the one large miss, not a uniform beating. **Neither pre-registered
+branch triggers cleanly** — this is not "market beats on the
+large-disagreement legs" (only one of two, decisively; the other went to
+the model) and not "bootstrap materially beats" (net is negative).
+Following the same conservative default the mechanical-econ fork commits
+to for its own mixed case: the veto boundary (0.10) stays untouched, no
+carve-out for the bootstrap sub-class, and it is NOT escalated to a
+permanent category bar either — the fork stays open, folded back into
+ordinary self-model tracking rather than resolved. The 180-199 miss
+repeats a pattern now seen three times (this leg, the Aug15-17 set's <40
+leg, box-office Spider-Man 66-68m): the model's highest-confidence
+bracket is where it has missed worst. 160-179 (c24926a5c9d7) is still
+open — not one of the two designated legs, but its eventual settlement
+(the true count almost certainly lands there, by elimination against the
+other four brackets) is a bonus, non-decisive data point worth logging
+when it lands.
+
+**First settlement, off-fork (2026-08-15 18:12Z, RETRO-20260815-1812):** the
+Aug13-15 2-day pair's 65-89 leg (`53c5bf348303`) settled No against a
+bootstrap est of 0.501 and a market ask of 0.63 — model brier 0.251 vs
+market brier 0.384, model beat market by 0.133 on this leg. This pair is
+NOT the pre-registered fork (that's the weekly 180-199/220-239 legs,
+settling Aug 18) — it's a useful early n=1 data point in the bootstrap's
+favor but does not resolve the fork. The sibling 40-64 leg (`10029a75295e`)
+is still open. No bet either way (outside-view veto still applied).
+
+**Pair complete, still off-fork (2026-08-15 19:12Z, RETRO-20260815-1912):**
+the sibling 40-64 leg (`10029a75295e`) settled Yes against a bootstrap est
+of 0.499 and a market ask of 0.40 — model brier 0.251 vs market brier
+0.372, model beat market by 0.121. Both legs of the Aug13-15 pair now agree:
+bootstrap beat market (n=2). Still off-fork — the fork verdict is decided
+only by the weekly 180-199/220-239 legs settling Aug 18. No bet either way.
+
+**Counting caution (DEEP-2026-08-16):** the two legs of this pair are
+complementary claims on the SAME realized count — once the count landed in
+40-64, both "40-64 Yes" and "65-89 No" were decided by that single fact,
+and the bootstrap's edge over the market on both legs is one insight
+double-counted, not two replications. Treat the pair as n=1 independent
+outcome in any fork or veto-record reasoning (the same convention the veto
+ledger already applies to the weekly sibling sets).
+
+**Cloud-runner egress note (2026-08-09 02:1xZ):** `api.the-odds-api.com`,
+`gamma-api.polymarket.com`, `clob.polymarket.com`, `clevelandfed.org`, and
+`xtracker.polymarket.com` were ALL reachable from the cloud runner this
+cycle with no proxy errors — the 2026-08-08 EGRESS_BLOCKED entries
+(journal/proposals.md) were evidently transient/flapping, not a standing
+gap; re-verify reachability each cycle rather than assuming yesterday's
+block still holds, and don't skip a source without trying it first.
+
+**Exploration budget, politics vote-share brackets (2026-08-06 19:13Z, first
+test of this category).** Hypothesis: "vote-count resolution is mechanical;
+is a constituency poll a granular enough benchmark for a 10-point bracket?"
+Tested on the Clacton by-election Count Binface vote-share brackets
+(5 mutually-exclusive brackets, siblings-verified `_sum_check` 1.041, normal
+vig). A single Survation constituency poll (2026-08-02) put Binface ~20%.
+PM's bracket prices (10-20%: 44.5%, 20-30%: 42.5%, <10%: 8%, 30-40%: 6.3%,
+≥40%: 2.8%) straddle the poll's 20% point almost exactly evenly — the book is
+already well-calibrated to the one available poll. Result: **reachable**
+(a single constituency poll is enough to benchmark a bracket set here) but
+**no edge** this instance — the market isn't lagging the poll, it's pricing
+it correctly. Politics vote-share brackets stay open as a category (ruled
+in, not out); revisit when multiple polls disagree or a poll updates after
+the book was last priced.
+
+**Durable lessons never live only in `schedule.json` reason fields
+(DEEP-2026-08-05).** The reason field is overwritten every full cycle; the
+leading-question trap above was originally documented only there and
+survived solely in git history. Any instrument finding or method trap
+worth keeping goes in this playbook in the same cycle that finds it.
+
+**Forecast-batch carrier checklist (DEEP-2026-08-17, after 4 dated
+misses).** Recording a batch of forecasts creates two obligations that
+MUST land in the SAME commit as the batch, or they get silently dropped:
+(1) a `strategy/funnel.jsonl` line for the cycle (operator mandate
+2026-08-05 §2 — the 2026-08-15 box-office cycle and the 2026-08-17 00:31Z
+gas-price cycle both recorded estimate-bearing batches with no funnel
+line); (2) a `schedule.json` watch_items entry naming the settlement
+date, the row ids, and any reading rule (exclusions, one-independent-
+outcome counting) — the box-office, Musk 2-day, UMich, and gas-price
+batches all shipped without one and each had to be back-filled by a deep
+retro. watch_items is the only carrier hourly ticks actually read
+(DEEP-2026-08-14); a batch without a carrier is a grading that will not
+happen. Empty FULL cycles: write the funnel line anyway (researched: [])
+— 2026-08-16 15:19Z did, 19:14Z/23:21Z didn't; pick the convention that
+keeps the funnel↔cycle reconciliation mechanical.
+
+**Checklist compliance, graded (DEEP-2026-08-18): 1 of 5 applicable
+batches in the first 24h after this rule landed.** The funnel-line half
+went 5/5; the watch-item half went 1/5 (missed: EPL Aug 21-24 batch, BoI/
+Iran rows, the HD earnings VETO row settling the same day, the market-cap
+pair; written: FL primary). The misses were exactly the load-bearing
+cases, so the rule's scope is right and compliance is the failure.
+Mechanism fix — weld the watch-item decision to the step that IS being
+executed reliably: **immediately after writing the funnel line, answer
+one question in the same breath: does any forecast in this batch (a)
+settle later than ~24h out, (b) feed the veto/counterfactual ledger
+(outside-view-veto, wide-spread-veto, category-bar), or (c) carry a
+reading rule (exclusions, one-independent-outcome counting)? If yes, the
+watch item goes in the SAME commit. If genuinely no (plain no-edge rows
+settling within ~24h, covered by the same-tick settlement carrier), a
+watch item is optional.** Also mandatory in every funnel line:
+`pool_by_query`/`pool_total` (3 of 7 FULL lines omitted them 2026-08-17/18
+while the cycle log carried the counts — the funnel line is where
+reconciliation happens; duplicating the numbers there is the point).
+
+**Re-research cooldown + pacing (DEEP-2026-08-04).** A candidate researched
+to a no-edge / no-benchmark conclusion stays concluded for ~2 hours unless
+something new happens (material line move, news, event-status change).
+Evidence: the 2026-08-04 01:15Z and 02:15Z cycles re-derived identical
+no-edge conclusions on the same UCL qualifiers 55 minutes apart, both
+logging "no new information"; 03:20Z partially repeated them again. When
+the entire window is in that state — every candidate either concluded
+within the cooldown or gated on an unreachable benchmark — set
+`strategy/schedule.json` `next_full_cycle_after` to the next event
+boundary (kickoff, report time, new candidates entering the scan window)
+instead of running another full cycle. Deferral spends no capital; its
+only cost is a delayed info-race discovery, so keep deferrals ≤3h and
+never past a known event start. Settling and open-position monitoring
+happen every tick regardless (schedule.json contract).
+
+**Prefer mechanically-resolving markets.** Consistent with the fact-finality
+rule, markets that resolve off an official print, close, or scoreboard
+(earnings, macro releases, match results) beat markets needing a judgment call
+about a source or a rules reading — the ai-leaderboard and Iran pairs cost $20
+between them on resolution-process risk ($15 now settled-lost, $5 still stuck).
+
+**Scheduled-release triage rule (DEEP-2026-08-05).** Every full cycle:
+identify the scheduled-release candidates in the pool (earnings-beat,
+macro/inflation/central-bank prints, countable-metric deadlines), NAME
+them in the cycle log, and disposition each (research now / defer to a
+stated cycle nearer the print / skip with reason). Evidence: a July
+inflation bracket cluster (annual 3.3%, annual 3.4%, monthly ≥0.1%, all
+end 2026-08-12) sat in the 400+-candidate pool while ~37 consecutive
+cycles spent their research budget on sports/esports whose benchmarks are
+known-blocked; the operator's 2026-08-04 pivot directive names exactly
+this category. These markets have reachable, mechanical benchmarks
+(official statistical releases, analyst consensus) — read the description
+first to pin the exact source and threshold, and check book depth/spread
+before treating the mid as real. Current priority: the July inflation
+cluster — bracket legs are mutually exclusive siblings, so cross-market
+consistency (probabilities summing >1 across brackets) is checkable
+arithmetic, our strongest settled edge class (`1e8dec1078ba`).
+
+**Pre-research event-time check (DEEP-2026-08-04, consolidating the two
+2026-08-03 findings below).** For any market tied to a scheduled event
+(match, series, scheduled report/print): pin down the actual start time —
+from the market description or one targeted search — BEFORE deeper
+research. `end_date`, `outcome_prices`, and scan mids are all unreliable
+about whether the event has started. If the event has started, or its
+status cannot be verified, skip. Evidence: the tennis and MLB findings
+below, plus 2026-08-04 04:16Z — Draper and Tsitsipas matches showed
+plausible paper edges against real bookmaker lines, but every live-score
+source (Sofascore, Flashscore, ESPN, TennisExplorer, Olympics.com) 403'd
+and match status could not be pinned down; both correctly skipped. An
+unverifiable event is not a discount on the edge, it is a veto.
+
+**`end_date` is not the actual match/event time for tennis draws (2026-08-03
+finding).** Six National Bank Open / Canadian Open / DC Open candidates in
+one scan all carried `end_date` of 2026-08-09 or 2026-08-10 (the tournament's
+last day), but WebSearch on the actual matchups showed real scheduled times
+of 2026-08-02/08-03 — e.g. Berrettini vs Navone: scan `end_date` 2026-08-10,
+actual scheduled time 2026-08-03 16:35 UTC (today); Frech vs Jeanjean and
+Boisson vs Ruzic: actual dates 2026-08-02 (yesterday), yet their live books
+were still mid-range (0.70-0.88), not resolved-looking. `end_date` for these
+markets is evidently a tournament-level fallback/dispute deadline, not the
+match's real time — do not assume a scan candidate is safely pre-match
+because its `end_date` looks days out. Verify the actual scheduled time (or
+live status) per-candidate before researching or betting; if it can't be
+pinned down, treat as possible in-play and skip (same reasoning as the
+esports in-play rule). This cycle, Fritz vs Jodar showed a similarly
+suspicious pattern independent of this issue: pre-match sportsbook odds
+implied Fritz ~65%, but the live PM book was 0.92-0.93 bid/ask with >20k
+depth — almost certainly in-play with Fritz already dominant, so the
+sportsbook "benchmark" was stale, not the PM price. Skipped.
+
+**Scan does not flag in-play status for single-game moneylines (2026-08-03
+finding).** WSH/PHI and STL/NYY MLB moneylines both showed large price
+divergence from pregame bookmaker consensus on deep, 1-cent-spread books
+($170k-295k liquidity) — looked exactly like a book-devig edge. Checking
+wall-clock time against the listed first pitch (in the market description,
+not `end_date`) showed both games had started 13-38 minutes earlier; the
+price move was in-play information, not a mispricing. `outcome_prices` and
+`end_date` are both stale/uninformative about in-play status. Before
+researching or betting any single-game team-vs-team market (not just
+esports), check current time against the actual listed start time in the
+description; if the game has started, skip — same rule as esports in-play,
+now confirmed to apply to traditional sports moneylines too.
+
+**MLB `Spread: TeamX (-1.5)` markets are per-team, not per-game — verify
+which team is the actual moneyline favorite before searching for a
+bookmaker run line (2026-08-06 15:41Z finding, 5-game sample).** Polymarket
+creates a separate -1.5 spread market for each team, e.g. an event can
+carry `Spread: Team A (-1.5)` and/or `Spread: Team B (-1.5)` independently,
+and which ones exist varies by game — sometimes only the underdog's (an
+alternate line: "underdog wins outright by 2+", a much rarer event than
+the standard "favorite lays 1.5"). A single bookmaker "run line" search
+(favorite -1.5 / dog +1.5) only prices the FAVORITE's -1.5 side; if PM's
+listed market is for the underdog's -1.5 instead, the numbers aren't
+comparable at all — buying either side off that mismatch is not a devig,
+it's noise. Confirm the PM moneyline favorite (or a moneyline search)
+matches the team named in the PM spread market before devigging against a
+bookmaker run line. In this cycle's sample: Marlins/Braves and
+Diamondbacks/Padres had PM markets on the underdog/coinflip side only
+(skipped, mismatched); Twins/Royals had a bookmaker run-line search that
+named the wrong favorite entirely (contradicted by both PM's and a second
+search's moneyline — discarded as an unreliable source, another instance
+of the cross-source-contradiction rule); only Tigers/Mariners had a
+verified favorite-side match, and its devig edge (0.014-0.018) came in
+under `min_edge_book_devig` (0.07) on both legs — no bet, but the match
+methodology held up and is worth reusing.
+
+**Selection pre-filter for this category (DEEP-2026-08-08, from the
+funnel record).** The 2026-08-07/08 window spent 15 of 35 research slots
+on mlb-spreads and got 9 benchmark-unreachable skips and 0 bets —
+`strategy/funnel.jsonl` cycles 04:15Z–02:13Z. The unreachables are
+structural, not bad luck: an underdog-framed `Spread: TeamX (-1.5)` (X is
+not the book favorite) has NO matching book quote by construction (books
+quote favorite -1.5 / dog +1.5; dog -1.5 is a rarer alt line few books
+carry), and series games add the wrong-day/starter-flip trap on top. So
+run the two cheap checks AT SELECTION TIME, before the candidate gets a
+research slot: (1) one moneyline lookup to confirm the PM spread's named
+team IS the favorite — if not, log the candidate straight to the funnel
+as benchmark-unreachable (fit-score benchmark=N) and spend the slot
+elsewhere; (2) for any series game, the date+probable-starter pin
+(2026-08-08 02:13Z rule above) before any devig. Full research effort is
+reserved for favorite-framed, date-pinned spreads — the only
+configuration that has ever produced a usable benchmark match in this
+category (Tigers/Mariners 2026-08-06; the 2363018c118b win).
+
+**Timeline-rumor research cap (DEEP-2026-09-02, from the funnel record).**
+The 2026-09-02 00:28Z and 04:13Z FULL cycles each spent 3 of 4 research
+slots on ai-model-release timeline-rumor questions (Gemini Flash by-Sep2
+re-check + its exact-Sep2 sibling + OpenAI Astra), every one of which is
+structurally unbettable by construction — the fact-finality gate vetoes
+rumor-based release-timing edges regardless of the estimate, and
+ai-model-release is also the forecast book's worst category (brier_delta
++0.188 on n=11, albeit rumor-correlated). Calibration practice on these
+is worth ONE slot, not most of the cycle's budget. Rule: at most ONE
+research slot per FULL cycle goes to fact-finality-gated timeline-rumor
+candidates, and sibling markets on the same underlying event (by-date /
+exact-date ladders) share that single slot — a coherent family estimate
+is one research act. Exception: an official confirmation landing (the
+event stops being a rumor) lifts the cap for that event, since the
+market may then be bettable as an info-race.
+
+Work from `core/scan.py` output (protected filters already applied).
+Prefer, in order:
+1. **Earnings-beat markets** (`Will X beat quarterly earnings?`) — resolve
+   same evening. Research: consensus EPS estimate, whisper numbers, the
+   company's historical beat rate (most large caps beat 75–85% of quarters),
+   recent guidance, peer results this season. Suspect mispricing when the
+   price is far from the historical beat base rate without news to justify it.
+   Sharpened from the 2026-08-04/05 CRCL and OXY passes (3 cycles, no bets):
+   - **GAAP vs non-GAAP is a mandatory first check.** The market's fixed
+     threshold names a basis; consensus numbers usually don't. CRCL's
+     threshold was GAAP $0.16 while every findable consensus ($0.165-$0.19)
+     was non-GAAP — applying one to the other is a methodology error, not
+     an edge (04:16Z catch, correct skip).
+     **Extension (2026-08-06 03:13Z, ABNB `3074288`):** GAAP-specific
+     consensus is frequently just unfindable via WebSearch, not merely a
+     basis-mismatch risk — every source for Airbnb's Q2 2026 report
+     (Yahoo, TipRanks, StockStory, MarketBeat) reported non-GAAP/adjusted
+     EPS ($1.19-$1.26) while the market's threshold was GAAP $1.25; no
+     source gave a standalone GAAP figure. Treat "no GAAP-basis number
+     found" as benchmark-unreachable by default for GAAP-threshold beat
+     markets, the same as a basis mismatch — don't fall back to the
+     non-GAAP consensus as a stand-in.
+   - **"Consensus clears the threshold" is not an edge when PM already
+     prices it ≥~0.80** (CRCL 0.845, OXY 0.91): the market has the same
+     consensus. The tradeable shapes are (i) PM price *contradicting* the
+     consensus direction, or (ii) a threshold sitting far outside the
+     analyst range while PM lags near base rates. Absent those, log
+     "market confirms, no edge" once and let the cooldown hold it.
+     **Recheck stop rule (DEEP-2026-08-13):** after a market-confirms /
+     no-edge log, a recheck is warranted only by NEW information (fresh
+     guidance, a filing, a named headline) — never by elapsed time alone.
+     Two consecutive rechecks concluding "no new information, book moved
+     further toward consensus" close the candidate until resolution; log
+     the closure once in funnel notes and stop touching it. Evidence:
+     AMAT (`3347174`) was re-researched 4 times in 11h (17:20Z, 21:19Z,
+     01:15Z, 04:14Z on 2026-08-12/13) with an unchanged est 0.90 and the
+     identical conclusion each time — three of those touches bought no
+     information and cost attention the disagreement-generating
+     categories should have had.
+   - **Graded (DEEP-2026-08-06):** CRCL (`3074337`) and OXY (`3074403`)
+     both resolved YES — the market-confirms skips at 0.845/0.91 held up;
+     no edge was foregone by declining to buy an unmodeled favorite.
+     First outcome evidence for this rule (n=2, keep grading).
+   - **Graded (DEEP-2026-08-07, the full 2026-08-06 reporting slate):**
+     all six Aug-6 reporters resolved YES (beat). Per disposition:
+     ED (`3074274`, skipped no-edge) — the tentative ~0.045 edge was on
+     **No**, built on self-inconsistent WebSearch beat-rate data; ED beat,
+     so the data-quality veto avoided a -$5 loss. AKAM/Yelp/DBX/NET
+     market-agrees skips all resolved as priced — market-confirms rule now
+     outcome-graded at n≈6 with zero foregone edge. MNST (`3074320`,
+     benchmark-unreachable: GAAP trap + 0.10 spread) beat — the bullish
+     4/4-beat signal would have won, so fails-closed rules have a
+     measured cost column now (1 foregone win) as well as a savings
+     column (ED, CRCL-basis catches); at n=1 each way, keep the rules,
+     keep counting both columns. ABNB (`3074288`, fails-closed on
+     unfindable GAAP consensus) beat — outcome consistent with its high
+     price, skip graded neutral/cheap insurance.
+   - **Graded (DEEP-2026-08-08):** UAA (`3089555`) resolved YES. The
+     no-signal skips (threshold $0.02 = consensus exactly, $187 book,
+     last priced ~0.52-0.62) grade as process-correct /
+     outcome-uninformative — with no directional signal there is no
+     foregone-edge claim either way on a coin-flip-priced market.
+     Market-confirms tally unchanged at n≈6, zero foregone edge.
+2. **Soccer daily match markets** — resolve at final whistle. Research: recent
+   form, injuries/rotation news, home/away splits, league table stakes,
+   odds at conventional bookmakers (the sharpest available benchmark — if
+   Polymarket materially diverges from bookmaker-implied probability, that is
+   the signal).
+3. **Esports pre-match only** (never in-play — the book moves faster than I
+   can research). Research: team ratings (HLTV for CS, etc.), map pools,
+   recent roster changes. Thin books here: check the spread before trusting
+   the price.
+4. **Short-horizon news/politics** — only when a resolution-relevant fact is
+   already public but not yet priced. Caveat (2026-07-30): "not yet priced"
+   must mean the BOOK, not the scan mid. Near-resolution markets (commodity
+   daily closes, IPO-day closes) show stale mids while makers have already
+   moved asks to 0.98+. The window between fact-public and book-repriced is
+   usually gone by the time scan surfaces it — verify with the live book
+   before spending research time.
+
+Avoid: anything the protected config bans (sub-daily crypto), in-play markets,
+markets whose resolution criteria I don't fully understand after reading the
+description, books with spread > risk.json `max_spread` (scope below).
+
+### Spread-rule scope (DEEP-2026-08-01)
+
+`max_spread` is a HARD veto for book-devig / benchmark-derived bets and for
+any market where my own estimate is uncertain: a wide book there means the
+benchmark comparison is unreliable and the market is telling me something I
+don't know (correctly applied to ENA/XRP retrospective-fact markets,
+2026-08-01 03:11Z).
+
+Narrow exception — **structural info-race only**: positions are held to
+resolution (never exited) and fill at the ask, so exit liquidity is
+irrelevant; a wide bid/ask on a market whose resolving fact is verified by
+multiple independent sources is the signature of the inattentive book this
+class targets (both structural wins came from 0.01–0.06-spread books; all
+seven book-devig losses from 1-cent books). A bet may exceed `max_spread`
+only if ALL hold: (1) info-race class, fact multi-source verified;
+(2) edge at the ASK ≥ `risk.json min_edge_wide_book` (0.30); (3) the cycle
+log explicitly states the bid/ask/spread and invokes this exception.
+
+**Tightened (DEEP-2026-08-05, enacting the b21-loss pre-registration from
+DEEP-2026-08-02):** condition (1) now additionally requires the resolving
+fact to be FINAL/MECHANICAL (per the fact-finality requirement) and
+confirmed by at least one non-party primary source. Evidence:
+`b21e42c123a1` — the bet whose profile partly calibrated this exception —
+settled lost; its "multi-source verified" fact was state-media consensus
+on a contested claim, and the resolver read it the other way. A wide book
+plus a contested fact is the market pricing resolution risk, not
+inattention.
+
+Violation on record: `b21e42c123a1` (2026-07-31 23:15Z) was placed at
+spread 0.13 with no mention of the spread in the cycle log — a silent skip
+of a written check. Whatever a bet's merits, a rule that seems wrong gets
+flagged in a retro and proposed for change; it does not get silently
+ignored. Every placement's cycle-log entry must state the spread check
+from now on.
+
+**Exploration budget, AI model release-date markets (2026-08-11 02:xxZ, first
+test of this category).** Hypothesis: "product release-date markets have a
+reachable benchmark (official roadmap, credible leak) the way earnings/econ
+releases do." Tested on `3206142` (Gemini Pro release by Aug 14, PM Yes
+0.065). WebSearch surfaced only rumor-aggregator blogs (coursiv.io,
+codersera.com, cometapi.com, felloai.com, androidinfotech.com) with mutually
+conflicting rumored dates — none citing a primary Google statement with a
+specific date. One credible secondary mention: Bloomberg reported the model
+"months behind schedule", and Google itself said 2026-07-21 it is "currently
+testing with partners" (still no ship date). Result: **not reachable for
+date precision** — same shape as the esports-echo and tip-site traps, an
+aggregator swarm around a real but vague signal — though the vague signal
+(delayed) is directionally corroborated by Bloomberg and agrees with PM's
+own low pricing. Recorded market-agrees, not benchmark-unreachable, since
+the direction (not the date) was confirmable. Category ruled OUT for
+date-precision bets absent a primary-source (official blog post, SEC
+filing, named-exec statement) announcement with an actual date; revisit
+only if one surfaces for a specific candidate.
+
+**Exploration budget, NFL player-trade-destination markets (2026-08-18
+21:xxZ, first test of this category).** Hypothesis: "sports-media trade
+speculation has a reachable benchmark (a beat-writer/insider report with a
+specific team and probability-bearing signal) the way roster/injury news
+does." Tested on `1387121` (Tyreek Hill -> Vikings by Aug 31, PM Yes 0.452,
+liquidity $69) and `1361018` (Maxx Crosby -> Cowboys by Sep 1, PM Yes
+0.0645, liquidity $1080). WebSearch on both surfaced only the same
+rumor-aggregator-blog swarm as the AI-model-release category above —
+"chatter," "cryptic social media comment," "hears trade chatter," dueling
+takes from SI/Yardbarker/Heavy/fansided — with no team, executive, or
+league source confirming a specific pending trade on either leg; the one
+concrete fact found (a Cowboys-Crosby trade *fell through* at the
+2026-02/03 deadline over a failed physical) is old and already priced in.
+Result: **not reachable for a specific-destination call** — same shape as
+the AI-release trap, an aggregator swarm around real-but-vague interest
+signals, no primary source to independently price against the market's own
+rumor-sentiment read. Recorded `benchmark-unreachable`, no forecast (no
+credible independent estimate formed, per the no-invented-estimate rule).
+Category ruled OUT for "will player X land on team Y" markets absent a
+primary-source (team/league official, or a specific insider report naming
+terms) announcement; revisit only if one surfaces for a specific
+candidate. Distinct from settled roster-status facts (played/inactive/
+released), which are mechanical and would score differently on property 1.
+
+**Exploration budget, foreign general-election seat-place brackets
+(2026-08-19 00:xxZ, first test of this category, market `2915350` "Will
+Auyl win the second most seats in the 2026 Kazakh Kurultai elections?",
+PM Yes ask 0.80 spread 0.02 liq $24.9k, election Aug 23).** Hypothesis
+under test: does this clear the general-election-extension's carve-out
+(playbook §Durable rule (contested primaries) > Extension to general
+elections — "elections WITH credible numeric polling... go through the
+normal estimation path")? WebSearch's own summary claimed three national
+surveys placing Auyl clearly 2nd; a direct WebFetch on a second source
+(timesca.com) found only ONE named poll (Kaliyev, published May 27 — 3
+months stale relative to the Aug 23 vote), naming a DIFFERENT party as
+frontrunner (Amanat, not Adilet — likely rebrand/naming confusion the
+summarizer didn't catch), and explicitly describing the 2nd/3rd-place seat
+as contested: "Auyl was not widely viewed as the leading contender for
+third place... most observers expected that role to belong to Ak Zhol,"
+with only a late, non-numeric perception shift cited for Auyl. Same
+WebSearch-summary-vs-source-conflation shape as the HK-weather and
+stale-year-actuals traps above, this time on poll *count* and *frontrunner
+identity* rather than a number. Result: fails the extension's "credible
+numeric polling" gate — the one real poll is stale and contradicted, not a
+tracker. Recorded `benchmark-unreachable`, no forecast. Category ruled OUT
+for foreign election seat-place brackets absent either (a) a numeric poll
+corroborated by a second independent source that agrees on both the
+frontrunner and the poll's existence, or (b) a mechanical anchor
+(substantially-complete official count).
+
+**Settlement update (DEEP-2026-08-25, RETRO-20260825-0637):** a later cycle
+(2026-08-22 16:14Z) re-checked this same market ahead of the Aug23 vote and
+found exactly what exception (a) requires — three converging polls (Auyl
+5.1-7.3%; Respublica separately fighting the 5% threshold near 4.8%) —
+recorded both legs `market-agrees` (forecasts 47ed7e39dade Auyl, 2c297b5fec4a
+Respublica). Both settled exactly as the corroborated polling predicted:
+Auyl WON 2nd place, Respublica LOST. Exception (a) is now a validated
+predictor, n=1 country/instance — the ruled-out gate above stands unchanged
+(still requires (a) or (b) to bypass it), this just confirms the exception
+pays off when it actually fires rather than being untested.
+
+**Managed-election centring note (RETRO-20260921-1120, Russia Duma Sep
+18-20 2026).** In a managed election the state pollster's published
+forecast understates the ruling party's official result: VCIOM forecast
+41-44 pct vs 49.8 official in 2021, 51-53 vs about 58 in 2026. My UR seat
+centre built from the 2026 forecast was 331; the preliminary count is 355.
+That 24-seat undershoot, not the undefined baseline clause, is what put own
+behind the book on the seat-GAIN legs (`23e8441da49c` own 0.25 vs mid
+0.2035, `ac1d41a88c55` 0.05 vs 0.024, both lost; `5ece5e87793d` own No
+0.35 vs mid 0.245, settled lost 2026-09-21 13:27Z, dB +0.0625; the event
+closed 0 for 3 against the book, summed dB +0.0855, one draw)
+and on the open UR seat brackets (`71dc5127a964`, `4c8153f75a72`). I had
+applied the 2021 pollster miss to LDPR (overstated) and skipped the mirror
+image for UR. Rule: a ruling-party share or seat estimate built from such a
+forecast is centred at forecast-top plus the prior cycle's miss, with the
+upside tail wider than the downside; if I cannot source the prior miss, the
+book's bracket prices are the better centre and the row is `market-agrees`.
+n=2 elections, one country: a centring rule for this family, not a betting
+licence.
+Settled 2026-09-25 11:42Z (RETRO-20260925-1207): the final UR total landed
+in 340-354, below the 355 preliminary count. `71dc5127a964` (340-354, own
+0.15 vs mid 0.24) WON, dB +0.1449; `4c8153f75a72` (355+, own 0.04 vs mid
+0.055) LOST, dB -0.0014. The book's bracket prices beat my rough centre on
+the leg that mattered, which is what this rule predicts: without a sourced
+prior miss, the book is the centre.
+Turnout legs settled 2026-09-25 13:49Z (RETRO-20260925-1421): official
+turnout landed in 59-62 (preliminary 59.32). Bet `475edf2e2654` (62+ No,
+own 0.94, entry 0.883) WON +$0.66, but only by about 2.7 points: my entry
+centre (2021's 51.7 plus a reported 50 pct regional target) was 7 points
+low, and the same undershoot put the 59-62 bracket forecast
+`524586e795a1` (own 0.12 vs mid 0.152) behind the book, dB +0.0553. The
+mid-election re-check `3873d4b596bb` (own No 0.55 vs mid 0.828, dB
++0.1729) overreacted the other way: it read a day-1 print that already
+included the online votes as ordinary day-1 turnout. The front-loaded
+online-vote model (53-58) was the closest of the four. Rules: (1) the
+centring rule above applies to turnout too - the official figure sits
+above the pollster's and the officials' stated targets, so centre at the
+prior cycle's official figure plus the prior miss, not below it. (2) In a
+multi-day vote with remote e-voting, the first print after the online
+votes are added front-loads them; carry it forward with the front-loaded
+model, not with an in-person day-1 ratio from a past cycle.
+
+**Regional-sweep roster-check note (RETRO-20260925-1432, same Russia
+Duma event, "United Russia wins every region" market).** Bet
+`9074e3f2fd49` (own 0.76 vs ask 0.68) WON, beating the market (dB
+-0.0448); the superseded first-pass forecast (own 0.62, market-agrees,
+dB +0.0184) had priced in a tail risk from the 4 regions UR lost the
+party-list plurality in during 2021 (Sakha, Mari El, Nenets AO,
+Khabarovsk) without checking whether those regions were even on this
+cycle's roster. The revision checked the actual 2026 39-region list and
+found none of the 4 on it — the roster instead skewed toward
+tightly-managed ethnic republics with a clean 2024/2025 sweep record —
+and that narrower, checked read is what beat the market. Method to reuse
+on the next regional/constituency-sweep market in a managed election:
+when a prior cycle's exceptions are the basis for this cycle's tail-risk
+estimate, check whether those exact regions/constituencies are in THIS
+cycle's roster before carrying the risk forward — a historical exception
+rate belongs to the specific units that produced it, not the country as
+a whole. n=1, confirmed instance of an underused check, not a new gate.
+
+**Exploration budget, Musk net-worth brackets (2026-08-19 04:xxZ, first
+test; ruling recorded here by DEEP-2026-08-19 — the 04:20Z cycle logged it
+only in funnel.jsonl/schedule.json, and rulings the pool re-check relies
+on belong in this file).** Event 770193, 6 sibling $100B-wide brackets
+settling Aug 31 (3213957-62), PM book internally well-calibrated (Yes-sum
+~1.001, mode $800-900B at 0.35). The stated resolution source (Bloomberg
+Billionaires Index Musk profile) WebFetch-403s (bot block, consistent with
+every prior Bloomberg attempt), and the fallback cross-check produced a
+~$300B same-day source-conflation spread ($675B Celebrity Net Worth;
+$777B and $889B both attributed to Bloomberg within one search summary;
+$744B stale Forbes contradicted by a same-day direct Forbes fetch showing
+$879.2B; one $0.97T outlier tracker) against $100B-wide brackets — worse
+than the HK-weather 3°C-vs-1°C-bracket precedent. No honest independent
+bracket estimate is possible; `benchmark-unreachable`, no forecast, no
+invented estimate. **Category ruled OUT while Bloomberg is unreachable
+and no single corroborated proxy exists.** Revisit only if a reachable
+proxy that the resolution source demonstrably tracks appears. Do NOT
+conflate with the Musk tweet-count family (xtracker.polymarket.com),
+which IS reachable and has its own standing characterization.
+
+**Exploration budget, Iranian rial USD threshold brackets (2026-08-19
+14:xxZ, first test).** New category: 7 sibling markets (3210162-64
+range brackets, 3210203-06 touch-by-Aug31 brackets) resolving against
+Bonbast.com's finalized free-market USD/IRR rate, Aug 31 deadline (~12
+days out at test time), liquidity $47-$8.2k. Unlike the Musk/Kazakh
+traps, the stated resolution source itself (Bonbast) is unambiguous and
+WebSearch's AI-overview returned one internally consistent spot figure
+(1,882,000 IRR/USD, +0.53% WoW) — no cross-source conflation this time.
+The blocker is different: **the source isn't independently verifiable**.
+A direct WebFetch of bonbast.com's live page returned the page shell
+with no numeric rate in the extracted content (JS-rendered table), and
+bon-bast.com/history 403'd (bot-blocked), so there is no way to pull an
+actual multi-week series and check the WoW-change figure WebSearch
+reported, let alone build the volatility estimate a 12-day multi-bracket
+forecast needs (the JPM-$1T/gas-touch precedent shows naive vol models
+only earn their keep when the vol input itself is trustworthy). Treating
+one unverifiable AI-summarized number as an estimation input would be
+the same failure class as the Kazakh/Musk conflation traps, just with
+one source pretending to be many. `benchmark-unreachable` on all 7,
+no forecast, no invented estimate. **Category ruled OUT pending either a
+fetchable Bonbast endpoint (their `/webmaster` page advertises an API —
+untried) or a corroborating second free-market IRR tracker** (alanchand.com
+resolved separately in this test at a materially different rate,
+1,897,000/1,878,000 sell/buy, ~1% off Bonbast's figure — plausibly a
+different rate basis, not necessarily a conflict, but unverified either
+way). Revisit only if the Bonbast API or an equivalent verifiable feed is
+confirmed reachable.
+
+## Open-position monitoring (DEEP-2026-08-02)
+
+Positions are held to resolution — never exited — but their live prices
+are free information about the resolver. **REQUIRED line in every cycle
+log, no exceptions** (sharpened DEEP-2026-08-03 after 10 of 19 cycles
+silently skipped it — including 23:11Z, the cycle that placed
+`84ec821167d5` and missed the start of its 0.14 collapse): for each open
+position past its market end date, fetch the current book and log
+`position id, entry, live bid/ask, mid, adverse move`; if none qualify,
+log the literal line "open-position monitor: none past end date". Any
+adverse move ≥ 0.10 from entry must be called out explicitly.
+Evidence: `d2dd24206542` repriced from ~0.08 Yes at entry to ~0.545 Yes
+over 2026-08-01/02 — 46 points against us on a thesis logged as
+"structurally impossible" — and ~28 consecutive cycle logs repeated
+"awaiting official resolution" without noticing. A sustained multi-day
+adverse repricing on an unresolved market is resolver-process evidence
+(dispute, rules reading we don't have) and feeds the position's eventual
+grading; it is NOT a reason to exit (we can't) or to average in (ledger
+forbids add-ons).
+
+**Sign-check the direction (DEEP-2026-08-31, RETRO-20260831-1619):**
+`quote.py` prices the exact token_id held. State the move as
+`(live_mark_for_held_side − entry)`, signed. A held token's price
+approaching 0 is ALWAYS adverse for that position (the market is pricing
+the held side to lose), never favorable, no matter how small the absolute
+number looks — do not eyeball "the ask is tiny" as "confirmed won." Prior
+instance: the 12:55Z 2026-08-31 cycle logged the Tokyo-27°C No position
+(entry 0.089) as "essentially confirmed won (ask now 0.001)" while ask
+0.001 on the held No token in fact meant No was near-certain to lose; it
+did, at −$5.00. Do the subtraction explicitly before characterizing a
+move as favorable or adverse.
+
+## Estimation method
+
+1. Read the resolution criteria in the market description. Bet on what
+   *resolves*, not what's likely in spirit.
+2. Form an independent estimate BEFORE looking hard at the market price
+   (anchoring guard). Write the estimate down in the rationale.
+3. Identify the sharpest external benchmark (bookmaker odds, analyst
+   consensus, base rates) and reconcile.
+   - **Cross-venue divergence (added DEEP-2026-08-05, corrected 2026-08-05
+     ~13:30Z after the operator's egress allowlist update):** a real-money
+     venue pricing the same event (Kalshi, CME FedWatch for Fed decisions) is
+     a benchmark at least as good as a devigged bookmaker line. Direct API
+     fetch to `api.elections.kalshi.com` now returns 200 from this runner
+     (was 403 before the 2026-08-05 10:53Z allowlist change) — use
+     `strategy/tools/kalshi.py events --series-ticker <t>` /
+     `markets --series-ticker <t>` (or `--event-ticker`) to pull live
+     yes/no bid-ask directly, no auth needed for public market data. Check
+     BOTH sides' bid/ask, not just one side's ask, before calling it a
+     divergence — and confirm the Kalshi and Polymarket contracts settle on
+     the same terms (same strike/threshold, same official source) before
+     treating a price gap as edge rather than a definitional mismatch.
+     `api.manifold.markets` is also 200 now but Manifold stays play-money —
+     reference only, never a benchmark. `www.metaculus.com/api2` is STILL 403
+     even with the allowlist (site-side bot block, confirmed from a
+     residential IP too) — for Metaculus, WebSearch for the venue's pricing
+     by name (e.g. "Kalshi Fed rate decision September odds") is still the
+     only channel, same pattern as sportsbook odds coverage.
+   - **Kalshi has a per-1%-bracket "Above X%" ladder for the unemployment
+     rate, series `KXU3-<YY><MON>` (2026-08-06 15:41Z finding, not the same
+     series as the payrolls/CPI ladders already validated 2026-08-05
+     13:45Z).** Differencing adjacent `Above` contracts gives an implied
+     point distribution to compare against Polymarket's own bracket set —
+     for July 2026 it disagreed with PM's internal ranking (Kalshi peaked
+     4.2% at ~0.32 with 4.1%≈0.21/4.3%≈0.28; PM priced 4.3% highest at 0.335
+     with 4.1% close behind at 0.295, understating 4.2% and overstating
+     4.1%/4.3% by several points each vs the Kalshi-implied numbers). Real
+     divergence, but PM's per-bracket books on this cluster are thin and
+     wide (0.07-0.10 spread on the 4.1%/4.3% legs, `journal/ledger.jsonl`-
+     verified via `quote.py`) — over `max_spread` (0.06), a hard veto for a
+     benchmark-derived bet (Spread-rule scope below), so the divergence is
+     unreachable, not exploitable. Log this as a distinct benchmark-reachable-
+     but-book-too-wide skip, and re-check the ladder near the 2026-08-07
+     08:30Z BLS release in case the book tightens.
+     **Recheck (2026-08-06 19:13Z, ~13h before release):** book tightened to
+     0.05 spread (now under `max_spread`) — the wide-book veto no longer
+     applies, but the edge itself doesn't clear the bar: best ask-edge across
+     the 4.0-4.3% legs is only 0.021-0.03 (4.1% No highest at 0.025, 4.3% No
+     at 0.03), under `min_edge` 0.04. The divergence direction is unchanged
+     from 15:41Z; it was never blocked on spread alone once you do the actual
+     ask-edge arithmetic — say so accurately next time rather than defaulting
+     to "unreachable." **`kalshi.py` usage note:** `markets --series-ticker
+     KXU3-26JUL` silently returns nothing — `KXU3-26JUL` is the *event*
+     ticker, not the series ticker (the series is just `KXU3`, spanning all
+     months). Use `markets --event-ticker KXU3-26JUL` to scope to one month's
+     ladder; `--series-ticker KXU3` returns all months unscoped. The tool
+     itself is correct (verified against the raw API this cycle); this was a
+     call-site error worth remembering so it doesn't cost another cycle.
+     **Outcome graded (DEEP-2026-08-08): July printed 4.1%** (FRED UNRATE,
+     2026-07-01 row, pulled directly). Both venues' modes were wrong —
+     Kalshi-implied peak 4.2% (~0.32), PM peak 4.3% (0.335) — so the
+     divergence the six-check thread was chasing was two thin, wrong
+     distributions disagreeing, not information. The noise-read skips were
+     validated concretely: the final pre-release candidate (4.1% No at
+     edge 0.04, exactly at min_edge, 07:30Z) was on the wrong side of the
+     print and would have lost. Rule: **a Kalshi-vs-PM price divergence is
+     a benchmark only when one side has a mechanical anchor** (official
+     nowcast, arithmetic on published components); two order books
+     disagreeing about the same unknown is a spread, not an edge — trade
+     it only with an independent estimate of the underlying, held to the
+     same standards as any other estimate. Honest caveat: my own
+     fair-value lean pointed away from the outcome (read 4.1% as
+     overpriced at ~0.295), so the discipline saved a loss the estimate
+     would have taken. n=1; grade the next ladder print the same way.
+   - **Devig with `strategy/tools/devig.py`, and use the POWER number for any
+     side priced below ~0.60.** Proportional (divide-by-sum) devig spreads
+     the vig evenly, but books load vig onto longshots (favorite-longshot
+     bias) — at typical 5-7% overrounds it inflates the cheap side by
+     ~0.5-1.5 cents (Sun ML +144: proportional 0.390 vs power 0.381), a
+     quarter-to-a-third of a 0.04 "edge". All 7 losing bets of
+     2026-07-30/31 bought the cheaper side (0.34-0.52) off proportional
+     devigs (DEEP-2026-07-31).
+   - **Check line freshness before calling a divergence an edge.** Scraped
+     aggregators lag; PM sports makers don't. If ANY book already matches
+     PM's number, or reports are mixed, assume PM reflects the current line
+     and the gap is a line move you saw late — not edge. Evidence:
+     `8e67cf4882bc` (entry note said "one book 4.5" while betting against
+     -4.5; Sky covered) and `1436bb727464` (aggregator "consensus 188-189"
+     vs PM 185.5; Under hit).
+   - **Same-day-deadline WebSearch timing (2026-09-01, the Mythos-class
+     "by-date" family).** A "no confirmed announcement yet" WebSearch read
+     on a market resolving "by end of day X," with an active credible
+     rumor of an imminent event, is weak evidence for No while day X
+     hasn't fully elapsed — it can just mean the event hasn't happened
+     YET, or has happened but hasn't reached my search index yet, not that
+     it won't happen today. Evidence: 3 of 5 outside-view-veto forecasts on
+     the Mythos-release-by-date family (`720781176db9`/`237402dd3f1e` est
+     No 0.80/0.94, `f9a6e09224dd` est No 0.88) were checked hours before
+     Anthropic's official Sep1 announcement, all LOST (counterfactual
+     ledger below) — the announcement landed later that SAME calendar day.
+     No capital was risked (fact-finality gate vetoes rumor-based edges
+     regardless), so this cost nothing, but the estimate itself was
+     overconfident on "No" for the wrong reason. For a same-day deadline
+     with a live imminent-event rumor, re-check close to the actual cutoff
+     before finalizing a low P(Yes) — one morning search isn't enough.
+   - **Quote the live bid/ask inside the rationale itself, not a number
+     carried over from earlier the same cycle (2026-09-04, Astra by-date
+     family, RETRO-20260904-2215).** Three outside-view-veto rows
+     recorded in one research pass (`99d1545b2ec7`/`7adc67fe86cc`/
+     `b249eb7256a0`, by-Sep4/5/6) wrote rationales claiming mkt Yes
+     ~0.14/0.315/0.36 and edges of 0.06–0.135, "under/near the 0.10
+     gate" — but the `best_bid_at_record`/`best_ask_at_record` fields
+     `forecast.py` actually stamped on those SAME calls read
+     0.862/0.864, 0.68/0.69, 0.63/0.65: the market had already repriced
+     to 64–86% Yes by the time these were recorded, a same-day move the
+     rationale never reflected. Graded against the true recorded book
+     the edges were 0.36–0.78, not marginal, and the market was right
+     (all three resolved Yes). Before finalizing any veto/no-edge
+     rationale, write the exact bid/ask about to be passed to
+     `forecast.py`/`ledger.py` into the note itself; if it has moved
+     sharply since the last check on the same market this cycle, that
+     move IS the signal to re-search before recording a number, not
+     noise to write past.
+   - **Count sources by underlying primary origin, not by search hits
+     (DEEP-2026-09-02; pre-registered as a watch item at the Alibaba
+     forecast's recording, settled evidence now cited).** Multiple
+     WebSearch hits that all proxy the SAME nominal primary source are one
+     observation, not independent confirmation. Evidence: Alibaba
+     best-Chinese-model (`a467140e14e7`, est 0.78 vs mkt 0.944) — three
+     separate web reads all restated the same arena.ai leaderboard
+     snapshot, treated as convergent support for fading a 0.94 favorite;
+     resolved WITH the market, −1.00u counterfactual. Same shape in the
+     Mythos by-date family (RETRO-20260901-2222): five deadline legs
+     re-confirmed off one underlying release rumor were "not 5 independent
+     confirmations — one correlated signal," 0W/5L counterfactual. Before
+     writing "multiple sources agree" in a rationale, name the distinct
+     primary origins; if they collapse to one, the estimate gets one
+     source's worth of confidence.
+4. Only bet when |my estimate − fill price| ≥ the min edge for the edge
+   class (`min_edge` for structural, `min_edge_book_devig` for book-devig
+   arbitration) AND I can name the specific reason the market is wrong.
+   "I feel it's mispriced" is not a reason.
+   - **A literal source-reading vs a >0.90 market consensus is a resolver-
+     process red flag, not just a confident fact.** Evidence (2026-07-31):
+     `7e753de88823` (Moonshot Yes) bet that a named leaderboard source
+     showed Moonshot on top; the operator verified that exact source
+     directly, three times spanning 22h including 2.5h *after* resolution,
+     and it never moved off the same reading — yet the market resolved the
+     other way, at ~93% confidence priced in advance. The market's price
+     predicted the resolution better than the literal source read did. When
+     your reading of a resolution-relevant source disagrees with a >0.90
+     consensus, that consensus likely embeds something about HOW the
+     resolver reads the source (which table/toggle/view, dispute
+     precedent) that a fact-only check doesn't capture. Before betting
+     against that kind of consensus, name specifically what the crowd
+     might be missing about the *resolution process* — not just re-confirm
+     the fact. This applies to resolution reads requiring a judgment call
+     (UI settings, which mirror/table); it does not apply to mechanical
+     resolution sources (a number printed in an official filing/API),
+     which aren't implicated by this evidence.
+   - **Outside-view veto on large claimed edges (DEEP-2026-08-07).** The
+     settled record splits cleanly on claimed edge size: bets claiming
+     edge > 0.10 are **0W/5L, -$25, brier_delta +0.4587** (agent brier
+     0.5714 vs market 0.1127 — catastrophically worse than the market:
+     `7e753de88823` 0.535, `0bf9fe3785c6` 0.617, `b21e42c123a1` 0.75,
+     `84ec821167d5` 0.49, `d6d71ab454dc` 0.17); bets claiming edge ≤ 0.10
+     are 6W/8L with brier_delta **+0.0041** — market-level. All five
+     large-edge bets were interpretive forecasts where I held NO
+     information the market lacked (a UI-toggle reading, two war-news
+     readings, a box-office press reading, an intraday-volatility
+     extrapolation from public spot data). Mechanism, not just small-n
+     correlation: on a liquid book, a 15-75 point disagreement with the
+     price is far more likely to be my model missing something than the
+     entire market missing something. Rule: before placing any bet with
+     claimed edge > 0.10, write down the specific fact or arithmetic the
+     market structurally CANNOT have priced (an official number already
+     published, a cross-market inconsistency computable from live books).
+     "My forecast disagrees with the price" never qualifies. If no such
+     fact exists, either shrink the estimate toward the market until the
+     edge is ordinary, or skip. (The 0.10 boundary is post-hoc at n=19 —
+     treat it as a red-flag trigger for this test, not a proven numeric
+     threshold; the test itself is the rule.)
+   - **Same-day commodity price-threshold bets on a live geopolitical
+     conflict complex: don't extrapolate "realized range so far" as a
+     volatility bound (DEEP-2026-08-06).** `d6d71ab454dc` (WTI closes above
+     $77) estimated P(Yes)=0.12 mid-day from "needed move ($1-2.4) exceeds
+     realized range so far (~$1.40)" plus a same-day bearish catalyst
+     (Iran/Strait-of-Hormuz deal hopes) — WTI closed $77.75 (+3.37% on the
+     day), the tail move happened, in the opposite direction of the cited
+     catalyst. This contract sits on the same US-Iran conflict complex as
+     `d2dd24206542` (a ceasefire position that has itself round-tripped
+     0.92→0.14→0.20+ on headline swings) — that complex produces discrete
+     headline-driven jumps, not bounded continuation from a mid-day
+     snapshot. n=1, not enough for a numeric floor, but treat "range so
+     far" reasoning on conflict-linked commodities as unreliable; either
+     discount confidence well below what the range-based math implies, or
+     require a catalyst check close to the actual close rather than hours
+     before it.
+   - **Mirror case, close-above rows recorded hours ahead on a day that is
+     already moving (RETRO-20260922-0015).** `1753e8464def` (WTI closes
+     above $91 on Sep 21) estimated 0.92 at 11:21Z from a 14-day realized
+     daily sd (2.6%) with the price 2.8% above the barrier and 7 hours to
+     the settle. The day delivered about -8.5% (a 3-sd day by that window)
+     and printed a low 0.19 above the barrier; the 17:33Z supersede at 0.78,
+     scaled from the day's own hourly range, was the calibrated number and
+     matched the market. Rule: when the day's move already exceeds about
+     2 window-sds at record time, the multi-day window is stale for the
+     rest of that session. Scale the remaining-session sd from the larger
+     of the window sd and the day's own realized range, and shade further
+     when the move is directional toward the barrier. Together with the
+     DEEP-2026-08-06 bullet: neither "range so far" nor a quiet-day window
+     bounds a conflict-linked commodity on a moving day; take the wider
+     of the two, and prefer superseding close to the settle over a single
+     read hours out. Both rows won, so this is a calibration lesson
+     (own Brier 0.0064 vs market 0.0042 on the early row), not a P&L one.
+5. **Check the live book first** (`python3 strategy/tools/quote.py
+   <clob_token_id>`, token ids are in scan output; if the sandbox blocks it,
+   `curl -s "https://clob.polymarket.com/book?token_id=<id>" -o work/book_<x>.json`
+   and read the file — fetch into `work/` not `/tmp`; the sandbox blocks
+   reading `/tmp` (learned 2026-07-30 cycle 3). `work/` is gitignored
+   (operator-notes 2026-08-31 ~21:30Z), so no manual cleanup is needed before
+   committing. `scan.py` outcome_prices are stale mids; fills happen
+   at the best ask. Apply `min_edge` to the ASK, not the scan price.
+   Evidence (2026-07-30 cycle): REF "No" scan mid 0.833 → ask 0.999
+   (rejected); NG "Up" scan mid 0.915 → filled 0.95, edge collapsed to 0.02;
+   WTI "Down" scan mid 0.926 → best ask 0.98 vs est 0.97 (negative edge,
+   skipped). Stale mids cut BOTH ways: Corinthians win scan mid 0.455 →
+   live book 0.42/0.43 (2026-07-30 cycle 4) — a marginal-looking edge on
+   the mid can be a qualifying edge at the ask, so check the book before
+   discarding near-threshold candidates too.
+
+6. **One position per market+outcome** — the ledger rejects add-ons even at a
+   better price (2026-07-30 cycle 5: Corinthians Yes re-entry at 0.42 vs held
+   0.43 rejected). If new evidence strengthens a held position, capture the
+   edge via a correlated sibling market instead: e.g. holding "Team A win Yes",
+   the extra edge showed up in "Team B win No" (devig 0.78 vs ask 0.74) —
+   sibling 1X2 legs are priced independently enough to diverge.
+   Sharpened (DEEP-2026-07-31) — know which pair type you're building:
+   - **Hedge-like pair** (e.g. "A win Yes" + "B win No": a draw splits them):
+     partial offset, acceptable. Evidence: `2c4c6a2adc0a`+`1e8dec1078ba`
+     went 1W/1L on a draw, net -$3.24.
+   - **Same-direction pair** (e.g. "A win No" + "B win Yes": both lose if A
+     wins): this is doubled event exposure, not extra edge capture. Only
+     take it when each leg independently clears its edge threshold, and
+     never exceed `risk.json max_stake_per_event_usd` on one underlying
+     event. Evidence: `821d54f6b7c8`+`53283a95e7bb` (open) — $10 rides on
+     "Bucaramanga doesn't win".
+   - Retros must grade a correlated pair as ONE decision (net P&L per
+     event), not as independent wins/losses.
+   - **Event definition + correlation logging (DEEP-2026-09-09).** For
+     `max_stake_per_event_usd`, an "event" is one real-world resolution
+     trigger: one game, one print, one ruling, one election night. Legs
+     on the same trigger count toward the cap ONLY if pairwise
+     positively correlated (both lose on the same realization of the
+     trigger); an explicitly hedging leg does not count against it, but
+     the hedge claim must be argued in the rationale AT ENTRY, with the
+     sign of correlation to each existing open leg on that trigger.
+     Evidence forcing the definition: the 2026-09-13 Swedish election
+     now carries three open No-side legs (e746d7e1ba99 Andersson-PM,
+     09fc471ceec1 SD-second-most, b063db346052 Liberals-threshold, $15
+     total). Credit where due: the hourly agent DID argue the pairwise
+     signs at entry in the schedule.json watch items (L-No negatively
+     correlated with Andersson-No, SD-vs-M bloc-neutral/negligible) —
+     the analysis was done; what was missing was any rule saying the
+     cap turns on it, so whether $15 on one election night was
+     compliant was undecidable from risk.json alone. Under this
+     definition it is compliant: no pair is cleanly same-direction
+     (L-No partially hedges Andersson-No via ~14 right-bloc seats;
+     SD-vs-M is inner-bloc). Pre-registered:
+     grade the trio at settlement as ONE event-night decision (net P&L,
+     plus whether a common polling-error factor moved all three), per
+     the schedule.json watch item. The trio stays on; the rule is
+     forward-looking.
+
+## Forecast ledger: what it can and cannot test (DEEP-2026-08-10)
+
+**Sign convention is the instrument's, always (DEEP-2026-08-21):
+`brier_delta = brier_agent − brier_market`, NEGATIVE = agent beat the
+market** (score.py's own docstring, and how every score slice prints).
+Three retros in one window (RETRO-20260820-2012, RETRO-20260821-0212,
+RETRO-20260821-0413) quoted "brier_delta" with the sign flipped
+(positive = beat the mid) — each individually harmless because the prose
+said which side won, but a slice claim assembled from those retros later
+would be sign-corrupted, the same failure family as the stale hand-carried
+No-side subtotals (2026-08-18/19). When writing any retro number named
+`brier_delta`, copy it from score.py output, don't recompute with your own
+sign; if quoting "how much I beat the mid by", call it something else.
+
+First scored window (2026-08-09/10): 54 forecasts recorded, 18 settled,
+brier_delta +0.001 (z -0.15) — estimates that agree with the market settle
+at market. Reassuring, and expected by construction. Three durable rules
+from the window:
+
+1. **The disagreement gap is the number to watch, not aggregate
+   brier_delta.** Only 6 of 55 recorded rows carry ask-edge ≥ 0.02
+   (3 politics, 2 econ, 1 earnings — ZERO sports), and none has settled;
+   the threshold sweep is empty. Sports-devig forecasts structurally
+   cannot test disagreement calibration: the estimate (devigged book
+   consensus) and PM's price are downstream of the same books, so
+   agreement is baked in. Only independent-source estimates — polls,
+   official prints, consensus EPS, count extrapolations — produce rows
+   where est and price genuinely differ. When allocating research
+   minutes, weigh a candidate partly by whether it can ADD a
+   disagreement row, since that is the only stream that will ever answer
+   "are we calibrated when we disagree?".
+   **No-side blind spot CLOSED (2026-08-24 actioned, DEEP-2026-08-14
+   proposal):** score.py now reports `threshold_sweep_no` alongside the
+   Yes-side `threshold_sweep` (complement edge `best_bid_at_record -
+   est_prob`, filled at `1 - best_bid`; rows lacking `best_bid_at_record`
+   are skipped and counted). First run on the full journal (2026-08-24):
+   the No-side stream is materially better-behaved than the Yes-side one
+   at every matched threshold — e.g. edge≥0.10: Yes n=7 win=0.00
+   brier_delta=+0.1176 (total loss) vs No n=11 win=0.55 pnl=-0.05u
+   brier_delta=+0.0190 (near flat); edge≥0.05: Yes brier_delta=+0.0531 vs
+   No brier_delta=+0.0313. Both sides are still net-negative brier_delta
+   (behind market when disagreeing), but the earlier "zero settled
+   evidence when disagreeing" framing was a Yes-side-only artifact — the
+   No-side stream shows disagreement calibration closer to the market's
+   than the Yes-side stream does. Note the sweep grades ALL settled
+   forecasts at recorded prices, not the same population as the
+   hand-kept realizable counterfactual-veto table below, so figures will
+   not match that table row for row. Retros citing "the sweep" from now
+   on must say which side.
+2. **Record even when declining — especially when declining.** The
+   outside-view veto (>0.10 claimed edge) would be unfalsifiable if
+   declined estimates were never scored. The 2026-08-10 declines (PLBY
+   claimed 0.14; WI Hong ≥30% bracket claimed 0.117) are both recorded
+   as forecasts, so the veto gets out-of-sample grading at zero bankroll
+   cost. **Pre-registered (grade in the next deep retros, explicitly):**
+   WI Hong brackets (settle ~Aug 11) and PLBY (Aug 10 night) — declined
+   side loses ⇒ veto validated; declined side would have won ⇒ first
+   evidence the veto over-fires. CPI rows (Aug 12) grade the econ pivot.
+   **PLBY graded (DEEP-2026-08-11): veto validated, instance one.** Yes
+   resolved No; the declined bet (est 0.33 vs ask 0.19, claimed edge
+   0.14) would have lost $5. Nuance worth keeping: the 04:16Z revised
+   estimate (0.33) was WORSE against the outcome than the stale 00:23Z
+   row (0.28) — a re-verification that "confirms a real signal" can
+   still move the number the wrong way, which is why revised-away rows
+   should be scored as their own slice if revision support lands
+   (journal/proposals.md 2026-08-10). Still pre-registered, settling
+   2026-08-11 night: WI Hong brackets (claimed edges to 0.117), SC
+   Nordone (claimed 0.27) / Fry (claimed 0.196) / Norman, MN Craig
+   (claimed 0.15) / Flanagan. The next deep retro grades EVERY one of
+   these rows explicitly — each is veto-validated or veto-over-fires;
+   an over-fire (Fry or Craig hitting) reopens the well-evidenced-
+   polling-exception question at a measured foregone cost.
+   **GRADED (DEEP-2026-08-12, provisional — on-chain prices near-certain,
+   UMA resolution pending): zero over-fires; every decided disagreement
+   went to the market. Row-by-row table and the durable primaries rule in
+   the "Primary batch graded" section below.**
+3. **Revision support ACTIONED (2026-08-24, DEEP-2026-08-10 proposal):**
+   `forecast.py record --supersede` now replaces the live open forecast
+   on a market+outcome when the read has materially changed (|delta
+   est_prob| >= 0.05, or a changed skip-reason); rows are linked
+   (`supersedes` / `superseded_by`), anti-flooding still fires without
+   the flag or without a material change. The superseded row stays open
+   and still settles, but score.py grades it in a separate
+   `revised_away` slice, not the headline stats or the threshold sweeps
+   — whether revisions improve estimates is measured, not assumed. Use
+   `--supersede` (not the funnel-note workaround) whenever a
+   re-verification materially changes an open forecast — e.g. the open
+   AfD Sachsen-Anhalt read (de95e5168de3 / forecast row) as the polls
+   move before its ~Sep4-5 re-check.
+
+**Exploration budget, low-media-coverage international elections (2026-08-10
+~14:5xZ, first test of this category).** Hypothesis: "national elections
+outside the US/UK/major-EU set have the same WebSearch-reachable polling
+infrastructure as domestic races." Zambia's 2026-08-13 presidential election
+(Hichilema vs Mundubile, PM prices Hichilema 0.91): every findable number was
+either a self-selected Facebook/online poll (55/35, 50/45) or a partisan
+domestic outlet's house prediction (Lusaka Times, Zambian Observer) — no
+Afrobarometer, Ipsos, or comparable scientific-sample poll turned up.
+Directionally unanimous (all sources favor Hichilema by a wide margin,
+consistent with PM's price), but not precise or credible enough to
+independently benchmark a specific probability — treated as
+benchmark-unreachable, no forecast recorded (honest-estimate rule: don't
+invent a number from unscientific sources). Category result: **reachable
+only for directional confirmation, not for a point estimate** — the opposite
+failure mode from the UK-GDP contradictory-single-sources case (there,
+credible sources disagreed; here, only non-credible sources exist at all).
+Revisit on an internationally-polled race (Afrobarometer-covered country,
+or one with an Economist/YouGov country tracker) before generalizing further
+to this category.
+
+**UK Q2 GDP re-check, one day pre-release (2026-08-11 06:xxZ) — two new red
+flags beyond the 08-08/08-10 contradictory-forecast finding.** (1) The
+sibling set (`siblings.py` on event 486133, 7 legs: negative, 0-0.1%,
+0.2-0.3%, 0.4-0.5%, 0.6-0.7%, 0.8-0.9%, >=1.0%) has unexplained GAPS —
+0.1-0.2%, 0.3-0.4%, 0.5-0.6%, 0.7-0.8%, 0.9-1.0% have no corresponding
+market at all, so a print landing in one of those bands would apparently
+make every listed sibling resolve No simultaneously. Either Polymarket
+defines an implicit rounding/bucketing rule not stated in any one market's
+description, or the bracket set is genuinely incomplete — don't treat the
+7-leg sum-check (1.0695, normal-looking vig) as informative until this is
+understood, since a sum computed over a non-exhaustive partition means
+nothing. (2) Each market's own resolution text says it resolves off the
+**"Second quarterly estimate, UK"** release "scheduled for August 12,
+2026," but links to the ONS's `gdpfirstquarterlyestimateuk` bulletin page,
+and a fresh WebSearch (Berenberg's Andrew Wishart, named source, Q2 growth
+"0.3% or 0.4%" barring a weak June) independently found the *first*
+quarterly estimate is scheduled for **August 13**, not the 12th — first
+vs. second estimate is a real distinction (different data vintage) and the
+date named in the market contradicts external reporting on the actual ONS
+calendar. Compounding: Berenberg's 0.3-0.4% point sits exactly in one of
+the undefined gaps above. Two independent ambiguities (which release, and
+whether the brackets even partition the outcome space) on top of the
+already-known forecast disagreement — treated as `ambiguous-resolution`,
+not `benchmark-unreachable` (the earlier framing): even a perfect
+benchmark wouldn't tell me which bracket wins here. No forecast recorded.
+If revisited after the release actually lands, check which day it
+actually printed on and whether an off-grid GDP value produced a NO sweep
+across all listed brackets — that would confirm or refute the gap-bucket
+reading with real data at zero cost.
+
+**Post-release grading (DEEP-2026-08-14) — test run, result inconclusive,
+item CLOSED.** The hourly cycles dropped this watch item (no cycle after
+2026-08-11 23:24Z touched it — third instance of the no-carrier failure,
+see schedule.json `watch_items`); the deep retro ran it: event 486133 is
+fully resolved, **0.4-0.5% bracket Yes, all six other legs No** (gamma,
+umaResolutionStatus resolved on every leg). The print landed on-grid, so
+the gap-bucket hypothesis (off-grid print ⇒ all-No sweep) was never
+exercised — untested, not confirmed. The abstention cost nothing (no
+bettable structure either way), and the first-vs-second-estimate date
+ambiguity evidently did not prevent clean resolution. Carry the lesson,
+not the item: bracket sets with undefined gaps stay `ambiguous-resolution`
+until a listed bracket is priced wrong on its own terms.
+
+## PPI YoY brackets: base-effect projection, first instance (2026-08-11)
+
+New category, econ-ppi (never researched before this cycle; scan's econ-tag
+query surfaced only 3 of the event's 10 sibling brackets, same
+discovery-gap shape already seen repeatedly on CPI — full set only
+recoverable by pulling the gamma event directly). Method for projecting
+next month's YoY print from the current one: `YoY_next(NSA) ≈
+YoY_current(NSA) × (1+MoM_next_consensus) / (1+MoM_sameMonthLastYear_actual)
+− 1`. This works because the 12-month change is NSA but a same-calendar-
+month seasonal factor cancels between the two years, so chaining forward
+with SA consensus MoM figures (the only ones publicly forecast) is a valid
+approximation, not a basis mismatch — confirmed by cross-checking the BLS
+release text explicitly labels the 12-month change "not seasonally
+adjusted" and MoM "seasonally adjusted" (bls.gov/news.release/ppi.nr0.htm).
+Applied to July 2026: Jun26 YoY 5.5% NSA (BLS-confirmed) × Jul26 MoM
+consensus +0.1% (tradingeconomics) / Jul25 MoM actual +0.9% (an unusually
+hot print rolling out of the base) ⇒ central estimate ~4.7% NSA, wide of
+the market's own apparent mode. Practical notes for reuse:
+
+1. **Needs the actual (not just consensus-implied) same-month-last-year
+   MoM** — this is where the edge came from (Jul25's atypical +0.9% MoM
+   makes Jul26 YoY decelerate faster than a naive "MoM stays flat"
+   read would suggest). Skipping this step is the most likely way to get
+   the method wrong.
+2. **SD calibration is thin** (n=2: May consensus-miss +0.4pp, June
+   -0.3pp) — used sd=0.45pp, deliberately on the wide/conservative side.
+   Revisit once more monthly misses are observed.
+3. **This event's book was bumpy/non-monotonic across adjacent 0.1pt
+   brackets** (Yes prices ...0.073, 0.168, 0.0485... not smoothly
+   decreasing away from the mode) and summed to ~1.14 — a thinner,
+   less-arbitraged book than the CPI event. Several legs showed large
+   nominal model-vs-market disagreement (5.3%, 5.4%, ≥6.0% all >0.10
+   apparent edge) but all had spread > max_spread 0.06 — wide-book veto
+   applied and declined regardless of edge size, per the DEEP-2026-08-07
+   large-claimed-edge caution. Only the `<=5.1%` leg had a tight book
+   (spread 0.02) and a sub-0.10 edge (0.06) — that's the one bet placed.
+4. **Pre-registered for grading**: settles with the Aug 13 08:30 ET BLS
+   PPI release. First out-of-sample test of this technique — do not
+   reuse it confidently on other econ-print brackets (CPI, PCE, etc.)
+   until this one grades.
+
+**Graded (DEEP-2026-08-13, RETRO-20260813-1707): WON.** July PPI printed
+inside the ≤5.1% NSA YoY bucket as the projection estimated; the bet leg
+(`b35963f465b4`, est 0.84 vs ask 0.78) settled +1.41, and all nine sibling
+forecast legs (5.2% through ≥6.0%, est_prob 0.00-0.05) correctly resolved
+lost, confirming the whole distribution shape, not just the one bucket.
+n=1 event — this clears the pre-registration bar (reuse with the same
+small-n caution as the sd=0.45pp calibration note above, not yet a proven
+technique) but is not a track record; do not port to CPI/PCE brackets
+without separately checking the sibling book's mode against the projected
+central estimate each time.
+
+**Correction (DEEP-2026-08-14) to RETRO-20260813-1707's counterfactual
+claim.** That retro stated the two wide-spread-vetoed sibling legs (5.3%,
+≥6.0%) "would have lost had they been bet, reconfirming that veto." Wrong
+side: the model's apparent edge on both legs was **No-side** (the funnel
+notes themselves say "large No-side edge"). Redone with fill arithmetic:
+5.3% (5ad483698a95, bid/ask 0.133/0.209) — No ask 0.867 vs model No
+0.964, realizable edge 0.097, and the bracket resolved No, so a $5 No bet
+would have **WON ≈ +$0.77**; ≥6.0% (4908388c9fd7, bid/ask 0.003/0.08) —
+No ask 0.997 vs model No 0.9973, edge ≈0.0003, **no realizable trade**
+(the apparent edge vs the mid evaporates crossing the spread — which is
+the actual justification of the spread veto on that leg). Net: the
+wide-spread veto's settled counterfactual record here is 1 missed win +
+1 correct non-trade, not 2 saves. Rule for future retros: counterfactuals
+get the same arithmetic as real fills — side, realizable ask, spread —
+never a narrative verdict.
+
+## Primary batch graded (DEEP-2026-08-12, provisional pending UMA)
+
+The largest pre-registered disagreement batch on record settled on-chain
+overnight (WI/SC/MN primaries, 2026-08-11). Grading is against live gamma
+prices at 04:4xZ Aug 12 — SC and MN legs are at 0.99+, effectively decided;
+the WI *winner* is genuinely uncalled (Crowley +0.4pp with ~87% counted,
+market ~0.90/0.07), but every margin bracket ≥5% is decided No regardless of
+winner since the realized margin is under 1pp either way. Finalize at UMA
+resolution; nothing below is expected to flip except possibly the WI winner
+legs and the Hong-by-<5% bracket, which are explicitly NOT graded.
+
+**Official settlements trickling in (DEEP-2026-08-13):** three
+politics-primary forecast rows have now settled on-chain via resolve.py
+(score.py politics-primary n=3, brier_delta +0.1109), including SC Fry
+(officially LOST, matching the provisional grade). Every official
+settlement so far matches its provisional grade; the batch's remaining
+rows are among the 31 open forecasts. No re-grading needed unless a WI
+leg resolves against its provisional call.
+
+| Row (forecast est vs mkt at record) | Outcome | Verdict |
+|---|---|---|
+| SC Nordone round-1 No lean (0.33 vs 0.595, claimed 0.27 — largest ever) | Nordone WON (0.99) | veto validated #2: $5 No bet would have lost |
+| SC Fry round-1 Yes (0.27 vs 0.0705, claimed 0.196) | Fry LOST (0.003) | veto validated #3 |
+| MN Craig nominee Yes (0.45 vs 0.295, claimed 0.15) | Craig LOST (0.0005) | veto validated #4 |
+| MN Flanagan nominee No lean (0.52 vs 0.715, claimed ~0.195) | Flanagan WON (0.9995) | veto validated #5 |
+| WI Hong ≥30% margin Yes (0.23 vs 0.10, claimed ~0.12) | margin <1pp ⇒ No | veto validated #6 |
+| WI Hong 25–30% / 20–25% (0.22 vs 0.135 / 0.24 vs 0.1845) | No | veto validated (same model, counted with #6) |
+| MN Gov Lindell lean (no forecast row — declined to estimate, 2026-08-09 pre-registration) | Demuth WON (0.9995) | confirmation per its own pre-registration |
+| SC Norman (0.32 vs 0.325, no-edge) | Norman LOST | at-market, no signal |
+| WI low brackets <5%/5–10%/15–20% (est below mkt) | ≥5% ones No | agent leaned righter, but same model that missed everything else — no credit claimed |
+
+Aggregate over the 13 forecast rows (provisional outcomes): agent brier
+≈0.174 vs market ≈0.116, delta ≈ +0.058 — the market decisively better,
+concentrated exactly in the large-claimed-edge rows. **The outside-view veto
+is now 6-for-6 with zero over-fires (PLBY + these five), all at zero
+bankroll cost.** The line-511 question ("well-evidenced polling exception in
+low-candidate-count primaries?") is answered: NO exception. The SC internal
+poll had Fry "narrowly ahead" — he got ~3% of the market's final price; the
+two aligned WI polls had Hong +24 — realized margin under 1pp.
+
+**The WI twist cuts deeper than "market right, agent wrong": the market was
+wrong too.** PM had Hong ~0.89-0.92 to win from Aug 7 through Aug 10;
+Crowley now leads. The polls-to-margin model normal(mean 24, sd 8) put est
+0.01 on "Hong by <5%" — reality landed at ±0.5pp, a beyond-99th-percentile
+miss of the model's own distribution. Low-turnout primaries are a category
+where sparse polling has no predictive validity AND the market price itself
+can be badly wrong — deference to the market here is not a safe harbor,
+it's just a cheaper way to be wrong.
+
+**Durable rule (contested primaries):** in contested-primary win/margin
+markets, polling-derived independent estimates are not bettable at any
+claimed edge (0-for-6 record above), and market-agrees positions are not
+safe either (WI). The category is research/forecast-only — record forecasts
+to keep measuring, never bet, unless the estimate has a mechanical anchor
+(e.g. substantially-complete official count with the market lagging it).
+Uncontested or landslide-polling primaries with the market already at 0.9+
+stay in the no-edge bucket they already occupy.
+
+**Extension to general elections (DEEP-2026-08-13, scope clarification —
+not new evidence):** the bar applies to ANY election win/margin market
+where the estimate has no numeric, methodologically-credible polling and
+no mechanical anchor — qualitative "expected to win" framing, however
+unanimous across outlets, is the same evidence shape that went 0-for-6 in
+the primaries. The 04:14Z 2026-08-13 cycle already applied this by
+extension on Zambia (fa185b55a5c3, est 0.87 vs ask 0.93, declined —
+correct call, wrong skip label, see §Skip-reason taxonomy `category-bar`);
+this paragraph makes the extension a rule so future declines don't need
+to re-derive it. Zambia was the first out-of-sample test of whether the
+bar's logic generalizes beyond primaries. **Settled (2026-08-18 18:16Z,
+RETRO-20260818-1816): Yes, market right (ask 0.93), model's 0.87 discount
+wrong — same evidence shape (qualitative "expected to win" framing, no
+numeric poll) as the primaries, same result (market beat the discounted
+estimate).** n=1 out-of-sample, consistent with but not by itself proof of
+generalization; the extension rule stands, confirmed rather than untested.
+Elections WITH credible
+numeric polling (Afrobarometer/Ipsos-class, or an Economist/YouGov
+tracker) are outside the bar and go through the normal estimation path;
+the WI lesson (market-agrees is no safe harbor) still applies there.
+Settled record of that carve-out (RETRO-20260907-1006): n=2 instances,
+both correct. Kazakh Auyl/Respublica (Aug 23, three converging polls,
+market-agrees, 2W/0L) and Sachsen-Anhalt AfD majority (Sep 6, dawum
+tracker + politpro seat model, bet WON, brier_delta -0.0315; see §First
+bet in 13 days for the seat-model family ruling). The carve-out stands
+as written; two instances do not widen it.
+
+**Another confirming instance of the durable bar itself (RETRO-20260916-0621):**
+RI Governor GOP primary (Sep 8, 2026), category-bar declined on both
+legs off the same Aug 3-11 poll (Pelino 37 / Guckian 17 / undecided 44,
+n=857): `1d37368ed8f2` Pelino Yes est 0.80 vs mkt 0.905 **LOST**;
+`09bc7a9861e8`/`ee25da18db9d` Guckian Yes est 0.09 vs mkt 0.098 **WON**.
+The market itself was pricing the eventual loser at 0.905 the night
+before the vote — same shape as the WI Hong/Crowley miss that founded
+this rule (large undecided share, market wrong too, not just the
+poll-derived estimate), at zero bankroll cost because the bar kept both
+legs forecast-only. No rule change; the bar keeps calling this correctly.
+
+**Price-inside-the-model-range rule (RETRO-20260921-0633, numeric-polling
+elections and any other self-built model):** when my model prints a RANGE
+across defensible input choices (poll weighting, recency window, error sd)
+and the market price lies inside that range, the claimed edge is an input
+choice, not a disagreement: record `no-edge` and do not bet. A bet needs the
+price outside the WHOLE range by at least `min_edge`, and the forecast note
+must quote the range. Evidence: Berlin Linke-most No `7ec71e307f12` LOST
+−$5 (MC 0.55 recency-weighted to 0.665 newest-poll-only, price 0.665, own
+0.60 picked mid-range, "edge" 0.05); all six Berlin Linke/CDU reads sat on
+the CDU side of a deep 0.01-spread book and all six lost to the mid
+(dBrier +0.005 to +0.114, one draw). Counter-instance where the test passes:
+MV AfD `506bc4c8087e` (sd sweep 0.80-0.96 vs ask 0.77, won). Corollary
+(label consistency): a market declined as `unvalidated-method` stays
+declined on that method until a settled row validates it; a smaller edge
+days later is not new evidence (Sep 14 decline at edge 0.06, Sep 18 bet at
+0.05, same Gaussian). Keep counting, not yet a rule: in both Sep 20 states
+my precedent adjustment (Berlin-2023 CDU bonus, Brandenburg-2024 SPD
+consolidation) shaded AWAY from the poll leader and the poll leader won
+(n=2 elections, one night).
+
+## Outside-view veto: settled counterfactual ledger (DEEP-2026-08-15)
+
+Per-row fill arithmetic over ALL settled `outside-view-veto` forecast rows
+(flat 1u on the model's side at the recorded book; the discipline the
+RETRO-20260813-1707 correction demanded). This table supersedes every
+narrative "N-for-N" veto claim; future veto-record statements cite it and
+extend it at each settlement.
+
+**Append discipline (DEEP-2026-09-02, bloat control):** this file crossed
+3,300 lines and the dated multi-paragraph batch narratives in this section
+are the fastest-growing block (+248 playbook lines in the 09-01→09-02
+window alone; every line is re-read by every hourly cycle). From now on a
+settled veto batch appends ONLY: its table rows, the one-line re-summed
+totals + side split with the arithmetic check, and at most 2–3 sentences
+of ruling. The full narrative (family history, method grading, lessons)
+lives in that settlement's retro, referenced by filename — the retro is
+already mandatory same-commit, so nothing is lost. Existing blocks stay
+as-is for now; if growth continues the next deep retro should compact the
+CLOSED-family narratives (Mythos, box-office Aug31, touch-family, AAA gas)
+down to their tables + retro pointers.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| SC Nordone (57f222efb516) | 0.33 / 0.595 | No | +0.260 | Yes | −1.00 |
+| SC Fry (e5666c235356) | 0.27 / 0.071 | Yes | +0.196 | No | −1.00 |
+| MN Flanagan (75f2545a7a0e) | 0.52 / 0.715 | No | +0.190 | Yes | −1.00 |
+| MN Craig (9ab914d80a5b) | 0.45 / 0.295 | Yes | +0.150 | No | −1.00 |
+| PPI 5.3% (5ad483698a95) | 0.036 / 0.171 | No | +0.097 | No | **+0.15** |
+| PPI 5.4% (169b4fd6c04a) | 0.027 / 0.049 | No | −0.019 | No | non-trade |
+| PPI ≥6.0% (4908388c9fd7) | 0.003 / 0.042 | No | ~0.000 | No | non-trade |
+| Musk 120-139 (5ef2f363f039) | 0.165 / 0.085 | Yes | +0.080 | No | −1.00 |
+| Musk 140-159 (b7a58fd571c8) | 0.64 / 0.415 | Yes | +0.220 | No | −1.00 |
+| Musk 160-179 (e06e9b2bea70) | 0.189 / 0.385 | No | +0.191 | No | **+0.61** |
+| Musk 180-199 (eb09f3632c5d) | 0.003 / 0.095 | No | +0.087 | Yes | −1.00 |
+| Musk 2d 40-64 (10029a75295e) | 0.499 / 0.39 | Yes | +0.099 | Yes | **+1.50** |
+| Musk 2d 65-89 (53c5bf348303) | 0.501 / 0.62 | No | +0.109 | No | **+1.56** |
+| Japan GDP 0.0-0.8% (d684f9caff81) | 0.2475 / 0.49 | No | +0.2125 | No | **+0.85** |
+| Musk 2d <40 (8f663df4a762) | 0.0146 / 0.195 | No | +0.175 | Yes | −1.00 |
+| Oak Street 17-20m (f0672a1a69e7) | 0.29 / 0.455 | No | +0.140 | No | **+0.75** |
+| Spider-Man <66m (9ad9a1e605a5) | 0.42 / 0.31 | Yes | +0.020 | No | −1.00 |
+| Spider-Man 66-68m (db6bd4ff0cb7) | 0.31 / 0.54 | No | +0.190 | No | **+1.00** |
+| Spider-Man 68-70m (64695326b358) | 0.19 / 0.0695 | Yes | +0.061 | No | −1.00 |
+| HD earnings (65aea7cd91f4) | 0.68 / 0.84 | No | +0.130 | Yes | −1.00 |
+| Musk wk 180-199 (99feadecc33b) | 0.494 / 0.325 | Yes | +0.164 | No | −1.00 |
+| Musk wk 220-239 (cf16f6424af7) | 0.024 / 0.145 | No | +0.116 | No | **+0.16** |
+| Musk wk 240-259 (cd3af116ed2a) | 0.16 / 0.2575 | No | +0.092 | Yes | −1.00 |
+| Musk wk 280-299 (cc08840449e9) | 0.31 / 0.165 | Yes | +0.141 | No | −1.00 |
+| TI VISION/Yandex (6b84771a3bd6) | 0.383 / 0.235 | Yes | +0.143 | No | −1.00 |
+| BTC touch-$80k (fc4a9d5caace) | 0.5034 / 0.388 | No | +0.115 | Yes | −1.00 |
+| WI Hong <5% (6a7decac51f2) | 0.007 / 0.0785 | No | +0.070 | No | **+0.08** |
+| WI Hong 5-10% (7ae672a0a6db) | 0.031 / 0.096 | No | +0.051 | No | **+0.09** |
+| WI Hong 15-20% (e6c093fc7660) | 0.178 / 0.209 | No | +0.023 | No | **+0.25** |
+| WI Hong 20-25% (597ed3729e91) | 0.241 / 0.1845 | Yes | +0.052 | No | −1.00 |
+| WI Hong 25-30% (1aab3bbe55be) | 0.224 / 0.135 | Yes | +0.084 | No | −1.00 |
+| WI Hong ≥30% (aac304cdebf7) | 0.227 / 0.100 | Yes | +0.117 | No | −1.00 |
+| KL 30C weather (ff0e79b1b303) | 0.26 / 0.0735 | Yes | +0.181 | No | −1.00 |
+| Amsterdam 25C weather (f352b500005a) | 0.13 / 0.45 | No | +0.31 | No | **+0.79** |
+| WI Crowley win (7dac557c4c19) | 0.0012 / 0.032 | No | +0.011 | Yes | −1.00 |
+| PCE MoM 0.1% (381c3e38473c) | 0.219 / 0.129 | Yes | +0.070 | No | −1.00 |
+| PCE MoM 0.2% (b6df56da3754) | 0.594 / 0.57 | Yes | +0.014 | Yes | **+0.72** |
+| PCE MoM 0.3% (c07caa45a8dc) | 0.175 / 0.25 | No | +0.065 | No | **+0.32** |
+| BoK hold (a8fa1e2ac41d) | 0.38 / 0.69 | No | +0.300 | No | **+2.13** |
+| BoK hike 25bps (d102445cc5d5) | 0.60 / 0.32 | Yes | +0.270 | Yes | **+2.03** |
+| UMich <49.0 (a5703b36d60a) | 0.334 / 0.177 | Yes | +0.157 | No | −1.00 |
+| UMich 49.0-51.9 (fdfd9e781481) | 0.321 / 0.38 | No | +0.059 | Yes | −1.00 |
+| GTA VI <10M views (9163ef072ce7) | 0.45 / 0.36 | No | +0.090 | Yes | −1.00 |
+
+**2026-08-30 update (backfilled during a reconcile.py gap-remediation pass;
+settled 2026-08-29 04:11Z, RETRO note already covered the settlement
+narratively but the same-commit table duty was missed): GTA VI "Extended
+Look" <10M-views-day1 (3943730) settled Yes (actual views came in under
+10M).** The declined side was No (est No=0.45 vs ask 0.36, fill-price edge
++0.090); actual outcome Yes means the No bet would have **lost, −1.00u** —
+the veto
+correctly avoided this loss (same shape as BTC touch-$80k and the UMich
+49.0-51.9 row). **Totals now 41 realizable trades, 16W/25L, net −12.01u.**
+Side split re-summed row-by-row over the full table: **Yes-side unchanged
+3W/15L, −10.75u**; **No-side 13W/10L, −1.26u** (adds this loss). Check:
+−10.75 + −1.26 = −12.01 ✓.
+
+**2026-08-31 update (DEEP-2026-08-31; both rows settled 04:41Z by the
+deep-retro's own resolve.py run, graded same-commit per the DEEP-2026-08-23
+rule): two touch-anytime veto rows.** BTC touch-$82k Aug24-30
+(cbbeb134c438): model side Yes (est 0.45 vs mid 0.26), fill ask 0.27,
+realizable edge +0.180, resolved No — **−1.00u** (another self-modeled
+touch-anytime Yes-side counterfactual loss; guessed-vol input, one of the
+three pre-registered touch-family gate rows). BTC touch-$80k
+created-Aug28-window market (9618a7d0872d): model side No (est No 0.88 vs
+mid 0.80), fill ask 0.82, realizable edge +0.060 — sub-0.10, declined on
+the pending touch-family gate rather than the numeric boundary, but the
+recorded label is outside-view-veto so it is on-ledger, same treatment as
+the sub-boundary WI Hong No rows — resolved No, **+0.22u** win. That row
+also grades the title-window≠resolution-window discipline note
+(proposals.md 2026-08-30 14:12Z) a first win at n=1: the window-quirk
+read was the whole edge. **Totals now 43 realizable trades, 17W/26L, net
+−12.79u.** Side split: **Yes-side 3W/16L −11.75u; No-side 14W/10L
+−1.04u.** Check: −11.75 + −1.04 = −12.79 ✓. Touch-family gate tally after
+these: ETH dip-2400 measured-vol WON (est above market, right; RETRO-
+20260831-0017), BTC-82k guessed-vol LOST (est above market, wrong), BTC
+dip-75000 measured-vol still open (settles Sep 1 04:00Z) — mixed 1-1, so
+the pre-registered "market wins all three → fix the vol input" branch
+cannot fire; final grade lands with leg 3. Mech-vs-own-vs-market on
+cbbeb134c438 (pre-registered on the schedule.json watch item): outcome No
+→ market brier 0.0676 < mech v4 0.1024 < own 0.2025 — mech beat own,
+nobody beat the market; own stayed 0.19 high even after two independent
+~0.3 signals (mech 0.32, market 0.26) — anchoring on the self-model
+after outside signals agree is the residual error shape here.
+
+**2026-09-01 update (RETRO-20260901-0025; two rows from this cycle, one
+backfilled compliance-gap row from the prior cycle):** Alphabet
+3rd-largest-by-market-cap (6317c8ab11b1, settled 2026-08-31T22:15:15Z by
+the previous cycle — flagged by `reconcile.py` as a same-commit-duty miss,
+fixed here): est 0.62 / mkt 0.942, side No, edge +0.319, resolved Yes
+(Alphabet was 3rd) — **−1.00u**. WTI HIGH $95 (fbc6aff9c7f4, settled this
+cycle): est 0.048 / mkt 0.20, side No, edge +0.142, resolved No (didn't
+touch) — **+0.23u**. WTI HIGH $90 (5ae6bf97d6a9, settled this cycle): est
+0.211 / mkt 0.45, side No, edge +0.229, resolved No (didn't touch) —
+**+0.79u**. Alibaba best-Chinese-model (a467140e14e7, settled this cycle):
+est 0.78 / mkt 0.944, side No, edge +0.163, resolved Yes (Alibaba was #1)
+— **−1.00u**. **Totals now 47 realizable trades, 19W/28L, net −13.77u.**
+Side split re-summed row-by-row: **Yes-side unchanged 3W/16L, −11.75u**;
+**No-side 16W/12L, −2.02u** (adds 2W/2L, net −0.98u this update). Check:
+−11.75 + −2.02 = −13.77 ✓. Gold HIGH $4700's revised read (52650469b8d8,
+category-bar, nominal edge 0.086 — under the 0.10 numeric boundary) is
+excluded from this table per the sub-boundary taxonomy below, same
+treatment as Musk wk 200-219 / Zambia. No policy change from this update
+(RETRO-20260901-0025 grades the pre-registered touch-family test in full —
+3-for-3 vetoed legs in the WTI/Gold Aug batch would have won their
+counterfactual, but that argues variance on top of an already-flagged
+unvalidated-vol family, not a boundary change at this n).
+
+**2026-09-01 update (RETRO-20260901-0639; 5 rows — 4 sequential veto
+snapshots on the same Mythos-class Aug31 market `2487205`, plus GTA VI's
+post-trigger veto forecast):** each Mythos row is a separate real-time
+book snapshot (re-researched independently as new information arrived),
+graded like the BoK pair's original-record-time convention — all four
+favored the No side (model diverged from market toward "not released"),
+actual outcome No, all four WIN. Mythos No (4aceafc01b6b, Aug25 21:26):
+est 0.95 vs ask 0.80, edge +0.150, **+0.25**. Mythos No (e35e582a4d22,
+Aug26 17:25, flipped from its Yes=0.30 tracking to the favored No side):
+est 0.70 vs implied ask 0.35 (=1−bid_yes 0.65), edge +0.350, **+1.86**.
+Mythos No (5d388f8d5585, Aug27 16:23): est 0.65 vs ask 0.54, edge +0.110,
+**+0.85**. Mythos No (c69958e0193a, Aug28 09:45, flipped from Yes=0.07):
+est 0.93 vs implied ask 0.73 (=1−bid_yes 0.27), edge +0.200, **+0.37**.
+GTA VI Yes (ce1727b53bd5, Aug27 16:43, the post-trigger re-veto after
+`c6f16acc55d9`'s entry): est 0.55 vs ask 0.32, edge +0.230, actual No →
+Yes side **lost, −1.00**.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Mythos No (4aceafc01b6b) | 0.95 / 0.80 | No | +0.150 | No | **+0.25** |
+| Mythos No (e35e582a4d22) | 0.70 / 0.35 | No | +0.350 | No | **+1.86** |
+| Mythos No (5d388f8d5585) | 0.65 / 0.54 | No | +0.110 | No | **+0.85** |
+| Mythos No (c69958e0193a) | 0.93 / 0.73 | No | +0.200 | No | **+0.37** |
+| GTA VI trailer (ce1727b53bd5) | 0.55 / 0.32 | Yes | +0.230 | No | −1.00 |
+
+**Totals now 52 realizable trades, 23W/29L, net −11.44u.** Side split
+re-summed row-by-row over the full table: **Yes-side 3W/17L, −12.75u**
+(adds GTA VI's loss); **No-side 20W/12L, +1.31u** (adds the 4 Mythos
+wins, +3.33u) — the No side crosses into cumulative positive territory
+for the first time. Check: −12.75 + 1.31 = −11.44 ✓. This widens the
+existing Yes/No asymmetry flagged since 2026-08-26/27 for a future deep
+retro; not decided here (hourly cycles extend the table, they don't rule
+on it).
+
+**2026-09-01 update (RETRO-20260901-1350; 8 rows, AAA gas-price
+touch-anytime set, all settled this tick).** All 8 legs (event 769509,
+first recorded 2026-08-17 as `outside-view-veto`, self-model + uniform
+large disagreement, 0 bets) resolved No — the national-average price
+never touched any of the 8 thresholds. Model favored No on every leg
+(est 0.01-0.035 vs live book 0.05-0.19); a clean directional sweep,
+though highly correlated (one price path drove all 8 legs, not 8
+independent draws) and still resting on the unvalidated 4-weekly-point
+sigma the original note flagged. Fill reference = best_bid_at_record (ask
+where no bid was posted); CF profit = 1/(1−ref) − 1 on the No side.
+
+| Row | est vs ref | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Gas $3.90 Low (e2cbca37fe88) | 0.035 / 0.18 | No | +0.145 | No | **+0.22** |
+| Gas $3.70 Low (9dffc25cddd9) | 0.01 / 0.04 | No | +0.030 | No | **+0.04** |
+| Gas $3.50 Low (cca60b062716) | 0.01 / 0.01 | No | +0.000 | No | **+0.01** |
+| Gas $3.25 Low (e45e186476b0) | 0.01 / 0.12* | No | +0.110 | No | **+0.14** |
+| Gas $3.00 Low (38c726c1c695) | 0.01 / 0.01 | No | +0.000 | No | **+0.01** |
+| Gas $4.25 High (d59e9243dfb4) | 0.019 / 0.09 | No | +0.071 | No | **+0.10** |
+| Gas $4.50 High (59f65e95ed5e) | 0.01 / 0.10 | No | +0.090 | No | **+0.11** |
+| Gas $4.75 High (9140e7f850f4) | 0.01 / 0.16* | No | +0.150 | No | **+0.19** |
+
+\* no bid posted at record time; ask used as the conservative reference.
+
+**Totals now 60 realizable trades, 31W/29L, net −10.62u.** Side split
+re-summed row-by-row: **Yes-side unchanged 3W/17L, −12.75u**; **No-side
+28W/12L, +2.13u** (adds this batch's +0.82u). Check: −12.75 + 2.13 =
+−10.62 ✓. Second touch-family family (after WTI/Gold's 3/3
+vetoed-would-have-won, RETRO-20260901-0025) where the self-model's
+*direction* beat the market despite an unvalidated sigma — flagged for
+the next deep retro's cross-family self-model review, not a policy
+change at this n (correlated legs, still no sourced daily-price series).
+No ranking/veto-boundary edit; AAA gas-price touch-anytime stays
+outside-view-veto/forecast-only.
+
+**2026-09-01 update (LIGHT tick 22:xxZ; 5 rows, the Mythos-class
+"by-date" nested-deadline family, all settled this tick after the
+official Anthropic announcement of Claude Mythos 5.1 / Fable 5.1
+propagated on-chain).** Same underlying fact as the 4-row Mythos-No
+batch already in this table (RETRO-20260901-0639, all 4 WON), but these
+are the LATER snapshots — checked Aug29 through the actual release day —
+and this time the model favored No on every leg and **all 5 LOST**: the
+release the rumor pointed at actually happened Sep1, hours after the
+last WebSearch check on several of these legs came back "no confirmed
+announcement." Not 5 independent confirmations — one correlated signal
+(same underlying release, five deadline windows) — but a clean reversal
+of the earlier batch's direction as the true event got closer.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Mythos by-Sep9 No (1f20cadb2b53) | 0.85 / 0.27 | No | +0.580 | Yes | −1.00 |
+| Mythos by-Sep1 No (720781176db9) | 0.20 / 0.68 | No | +0.480 | Yes | −1.00 |
+| Mythos by-Sep1 No (237402dd3f1e) | 0.06 / 0.31 | No | +0.250 | Yes | −1.00 |
+| Mythos exact-Sep1 No (4c648c2e6afb) | 0.03 / 0.29 | No | +0.260 | Yes | −1.00 |
+| Mythos by-Sep2 No (f9a6e09224dd) | 0.12 / 0.55 | No | +0.430 | Yes | −1.00 |
+
+(720781176db9 and 237402dd3f1e are sequential re-checks of the SAME
+by-Sep1 market, same convention as the earlier Mythos No sequence —
+both count as separate row-time snapshots, per the existing table
+practice.) **Totals now 65 realizable trades, 31W/34L, net −15.62u.**
+Side split re-summed row-by-row over the full table: **Yes-side
+unchanged 3W/17L, −12.75u**; **No-side 28W/17L, −2.87u** (adds this
+batch's 0W/5L, −5.00u — the No side's first net-negative turn since the
+AAA gas batch pushed it positive). Check: −12.75 + −2.87 = −15.62 ✓.
+Full Mythos-rumor-family lifetime tally (9 rows, both batches): 4W/5L,
+net +3.33−5.00 = **−1.67u** — betting real money against this rumor
+would have lost money over the family's full life, reinforcing (not
+contradicting) the fact-finality gate: zero capital was ever actually
+risked on any of these 9 rows, exactly because "unconfirmed rumor" stays
+vetoed regardless of the model's confidence, and the model's confidence
+here would have been wrong more often than right by the end. No
+veto-boundary change — this is the gate working as designed, not a
+reason to loosen it. Concrete estimation lesson, encoded below in
+§Estimation method (same-day-deadline WebSearch-timing sub-bullet): a
+single WebSearch check earlier in the day on a "by end-of-date-X"
+deadline market, with an active rumor of an imminent event, is weak
+evidence for No if the deadline hasn't fully elapsed — three of these
+five legs were checked hours before the actual announcement landed
+later the SAME day, and "no confirmation as of this morning's search"
+was read as informative when it was mostly a search-timing artifact.
+Re-check same-day deadlines close to the actual cutoff before
+finalizing a rumor-based No, don't rely on one AM check.
+
+**2026-09-02 update (00:15Z FULL cycle: box-office Aug31 gross-threshold
+pair CLOSED, pre-registered 2026-08-22, watch item in schedule.json).**
+The Odyssey/Spider-Man BND domestic-gross family settled: Odyssey missed
+$570M (d48834ed8f41), Spider-Man BND missed $900M but landed in
+[800M,900M) — the sibling bracket for that exact range (e9f9221a3afb)
+WON as a forecast. Four `outside-view-veto` rows from this family enter
+the counterfactual ledger:
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Odyssey ≥570m (d48834ed8f41) | 0.08 / 0.14 | No | +0.057 | No | **+0.16** |
+| Spider-Man ≥900m (1f552d2c510f, Aug22 check) | 0.25 / 0.336 | No | +0.085 | No | **+0.50** |
+| Spider-Man ≥900m (1e889dd4dd33, Aug25 update) | 0.15 / 0.092 | Yes | +0.058 | No | −1.00 |
+| Spider-Man <900m (9f40def4f61c) | 0.85 / 0.915 | No | +0.060 | Yes | −1.00 |
+
+(e9f9221a3afb, the 800-900m bracket itself, was a genuine market-agrees
+no-edge read — 0.90 vs ask 0.86 — not a veto row, so it doesn't enter
+this table.) Net this batch: **−1.34u** (2W/2L). **Totals now 69
+realizable trades, 33W/36L, net −16.96u.** Side split re-summed: **Yes-side
+3W/18L, −13.75u** (adds this batch's 0W/1L, −1.00u); **No-side 30W/18L,
+−3.21u** (adds this batch's 2W/1L, +0.66u−1.00u=−0.34u). Check: −13.75 +
+−3.21 = −16.96 ✓.
+
+Grading the two things schedule.json's watch item asked for: (1) **the
+veto boundary** — this batch's ledger P&L is net negative (−1.34u), so
+the veto continues to look correct on net even though two of the four
+counterfactual sides won; no change to the standing box-office
+self-model veto. (2) **the trend-extrapolation method itself** — on
+*directional* accuracy it was clean: all four legs' Aug22-25 point
+projections (Odyssey ~544M, Spider-Man ~875-897M) correctly bracketed
+where the film actually landed (Odyssey short of 570M, Spider-Man inside
+[800M,900M)). But the two Aug25-update legs (1e889dd4dd33, 9f40def4f61c)
+lost as counterfactual trades anyway, because by Aug25 the market itself
+had already converged to 91-92%/90-92% confidence in the correct
+bracket — the model's residual disagreement with an already-converged
+market was noise, not edge, even though the model's own point estimate
+was directionally fine. Lesson for this family: a trend-extrapolation
+edge claim late in the window, against a market that has already priced
+in the same trend data, deserves more skepticism than the same claim
+made earlier — the method's forecasting skill and its counterfactual
+tradeability are not the same thing once the market catches up. No
+playbook rule change; this reinforces (not contradicts) routing box-office
+self-models through the veto regardless of claimed edge. Item closed, no
+further grading duty.
+
+**2026-09-02 update (RETRO-20260902-0212, LIGHT tick; 2 rows, first
+settled instances of the transfer-window narrative/negotiation-speculation
+sub-shape — soccer-transfer / news-transfer category, no mechanical
+benchmark available for "will X join/stay" questions).** Enzo Fernandez
+stay-at-Chelsea (`dc81cc744a86`, est P(stay)=0.60 vs ask 0.312, Yes side)
+resolved No (he left, to Man City) — the public "Enzo is a Chelsea player"
+narrative signal read wrong underneath a quietly-progressing deal, **lost,
+−1.00u**. Enzo Fernandez join-Man-City (`e481c796f8d1`, Aug27 19:22Z
+snapshot, est No=0.25 vs ask 0.17, No side) resolved Yes (he joined) —
+called before the story firmed, **lost, −1.00u**.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Enzo stay-Chelsea (dc81cc744a86) | 0.60 / 0.312 | Yes | +0.288 | No | −1.00 |
+| Enzo join-ManCity (e481c796f8d1) | 0.25 / 0.17 | No | +0.080 | Yes | −1.00 |
+
+Net this batch: **−2.00u** (0W/2L). **Totals now 71 realizable trades,
+33W/38L, net −18.96u.** Side split re-summed: **Yes-side 3W/19L, −14.75u**
+(adds this batch's Chelsea loss); **No-side 30W/19L, −4.21u** (adds this
+batch's Man City loss). Check: −14.75 + −4.21 = −18.96 ✓. n=2, 0W/2L —
+consistent with (not yet a distinct named instance of) the standing
+outside-view-veto discipline; too small to write a dedicated rule. Worth
+noting: the 4 later join-Man-City snapshots that went market-agrees
+instead of chasing the narrative (once the book itself converged past
+~0.85 with real depth) all landed on the winning side — downgrading from
+a confident narrative read to market-agrees as the book firms is what
+kept most of this family off the losing side of the ledger.
+
+**2026-09-02 update (RETRO-20260902-1814, FULL cycle; 4 rows, Gemini
+Flash 3.8+ leak/rumor family fully settled).** All four sequential
+outside-view-veto snapshots on "next Gemini Flash release by/on Sep2"
+settled: the model WAS released, so every No-side veto lost as a
+counterfactual trade. Same rumor-convergence shape as the Mythos family
+(DEEP-2026-09-01, 22:xxZ) — unofficial leaks (codename "skimaki"/Jetski)
+converged on the correct date well before official confirmation, and the
+market priced that correctly while the fact-finality gate correctly
+declined to bet against it:
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Gemini Flash by-Sep2 No (4a680e8bca1e, initial check) | 0.13 / 0.655 | No | +0.53 | Yes | −1.00 |
+| Gemini Flash by-Sep2 No (a554a9f53079, re-check) | 0.50 / 0.675 | No | +0.19 | Yes | −1.00 |
+| Gemini Flash by-Sep2 No (8f8fa61af2a2, re-check) | 0.58 / 0.79 | No | +0.22 | Yes | −1.00 |
+| Gemini Flash on-Sep2 No (655167550ada, sibling) | 0.58 / 0.775 | No | +0.21 | Yes | −1.00 |
+
+Net this batch: **−4.00u** (0W/4L). **Totals now 75 realizable trades,
+33W/42L, net −22.96u.** Side split re-summed: **Yes-side unchanged 3W/19L,
+−14.75u**; **No-side 30W/23L, −8.21u** (adds this batch's 0W/4L, −4.00u).
+Check: −14.75 + −8.21 = −22.96 ✓. Est climbed 0.13→0.50→0.58→0.58 as
+corroborating leaks piled up (correctly applying the Mythos-episode
+same-day-deadline lesson — later checks, not one AM read), but even the
+final 0.58 stayed well below the market's 0.775-0.79, and the market was
+right. Reinforces, does not contradict, the standing gate: zero capital
+was ever at risk on any of these four rows, exactly because "unconfirmed
+leak, however convergent" stays vetoed regardless of claimed edge. The
+two same-cycle crypto-touch settlements (BTC $77.5k, ETH $2400, both WON)
+carried ~0 realizable edge at record time (est essentially at the book)
+and are not counterfactual trades — no ledger duty, no touch-family n
+change.
+
+**2026-09-02 update (compliance-gap backfill, DEEP-2026-09-02 22:xxZ
+reconcile.py FAIL remediation, same-commit per the Coverage weld rule;
+2 rows, both crypto-brackets touch-anytime, settled earlier but missed
+by this table until now).** ETH $2600-in-August touch (`9f1fedaa0386`,
+settled 2026-09-01T04:40:58Z): self-modeled GBM barrier-touch est
+P(Yes)=0.48 vs mkt mid 0.6855, model favors No (No prob 0.52) vs No ask
+0.326 (=1−best_bid 0.674), edge +0.194; actual result No (didn't touch)
+— model's No side **WINS**, fill ask 0.326, **+2.07u**. BTC
+above-$76k-on-Sep2 (`d16f83d68630`, settled 2026-09-02T16:23:22Z):
+guessed-vol lognormal est P(Yes)=0.838 vs mkt mid 0.945, model favors No
+(No prob 0.162) vs No ask 0.06 (=1−best_bid 0.94), edge +0.102; actual
+result Yes (stayed above) — model's No side **LOSES**, **−1.00u**.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| ETH $2600 Aug touch (9f1fedaa0386) | 0.52 / 0.326 | No | +0.194 | No | **+2.07** |
+| BTC >$76k Sep2 (d16f83d68630) | 0.162 / 0.06 | No | +0.102 | Yes | −1.00 |
+
+Net this batch: **+1.07u** (1W/1L). **Totals now 77 realizable trades,
+34W/43L, net −21.89u.** Side split re-summed row-by-row: **Yes-side
+unchanged 3W/19L, −14.75u**; **No-side 31W/24L, −7.14u** (adds this
+batch's 1W/1L, +2.07u−1.00u=+1.07u). Check: −14.75 + −7.14 = −21.89 ✓.
+Both rows are guessed/self-modeled-vol touch-family members already
+covered by the CLOSED ruling below (unvalidated-method, forecast-only
+regardless of edge) — no policy change, this batch only closes a
+same-commit-duty gap flagged by `reconcile.py`.
+
+**2026-09-03 update (LIGHT tick settlement, retro RETRO-20260903-0633):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Astra by-Sep2 (2daa083970d8) | 0.10 / 0.185 | No | +0.028 | No | **+0.15** |
+
+Net this batch: **+0.15u** (1W/0L). **Totals now 78 realizable trades,
+35W/43L, net −21.74u.** Side split re-summed row-by-row: **Yes-side
+unchanged 3W/19L, −14.75u**; **No-side 32W/24L, −6.99u** (adds this
+batch's 1W/0L, +0.15u). Check: −14.75 + −6.99 = −21.74 ✓. Smallest edge
+yet added to this table (0.028, under min_edge 0.04) — the veto's own
+timeline-rumor read was correct, but n=1 at this edge size is not
+evidence for lowering any floor.
+
+**2026-09-03 update (FULL cycle 17:20Z, retro RETRO-20260903-1720; 3
+same-day weather-Gaussian rows):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Singapore 32C Sep3 (e48e803b2103) | 0.233 / 0.07 | Yes | +0.143 | No | −1.00 |
+| Shanghai 32C Sep3 (3cf21078d1a0) | 0.049 / 0.355 | No | +0.271 | No | **+0.47** |
+| Singapore 33C Sep3 (32d046d6981c) | 0.323 / 0.845 | No | +0.497 | Yes | −1.00 |
+
+Net this batch: **−1.53u** (1W/2L). **Totals now 81 realizable trades,
+36W/45L, net −23.27u.** Side split re-summed row-by-row: **Yes-side
+3W/20L, −15.75u** (adds −1.00u); **No-side 33W/25L, −7.52u** (adds
++0.47u−1.00u=−0.53u). Check: −15.75 + −7.52 = −23.27 ✓. Weather-Gaussian
+class now 2W/3L, −1.74u. Ruling: the two losses were recorded at 10:22 and
+12:18 local time on the resolution day with the next-day sd=1.2C applied
+to a half-observed day (the 33C bucket was the point forecast's own mean;
+the market had it at 0.845, the model 0.323). **Same-day weather rows must
+condition on the observed partial-day max (open-meteo hourly, `past_days=1`,
+or `current`) with sd 0.6C after local noon; if that fetch fails, no
+forecast at all.** Next-day rows keep sd=1.2C. Category stays no-bet.
+
+**2026-09-03 update (LIGHT tick 22:04Z, retro RETRO-20260903-2204; 2
+next-day weather-Gaussian rows, one event):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Ankara 30C Sep3 (aac6d9fc2b4a) | 0.287 / 0.565 | No | +0.273 | Yes | −1.00 |
+| Ankara 31C Sep3 (428600857382) | 0.140 / 0.375 | No | +0.220 | No | **+0.56** |
+
+Net this batch: **−0.44u** (1W/1L). **Totals now 83 realizable trades,
+37W/46L, net −23.71u.** Side split re-summed row-by-row: **Yes-side
+unchanged 3W/20L, −15.75u**; **No-side 34W/26L, −7.96u** (adds −0.44u).
+Check: −15.75 + −7.96 = −23.71 ✓. Weather-Gaussian class now 3W/4L,
+−2.18u; next-day sub-class 2W/2L. Ruling: recorded 05:22 local (pre-dawn),
+so functionally next-day and untouched by the same-day rule above. The
+market put 0.94 on two adjacent buckets (implied sd ≈0.55C vs the model's
+1.2C) and was right; at about six settled next-day rows, test the
+open-meteo ensemble spread per city against the fixed sd. No change now.
+
+**2026-09-04 update (FULL cycle 04:13Z, retro RETRO-20260904-0413; 2 rows,
+GTA VI Extended Look <20M-views week-1 market, two of its four sequential
+snapshots):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| GTA VI <20M wk1 (b5c5c134d7cb) | 0.55 / 0.60 | No | +0.030 | No | **+1.38** |
+| GTA VI <20M wk1 (e398cebab2e6) | 0.30 / 0.82 | No | +0.510 | No | **+4.26** |
+
+Net this batch: **+5.64u** (2W/0L). **Totals now 85 realizable trades,
+39W/46L, net −18.07u.** Side split re-summed row-by-row: **Yes-side
+unchanged 3W/20L, −15.75u**; **No-side 36W/26L, −2.32u** (adds this
+batch's 2W/0L, +5.64u). Check: −15.75 + −2.32 = −18.07 ✓. Both wins are
+late, well-anchored trend-extrapolation reads on a market with an actual
+climbing view count (own family narrative in the retro), the mirror image
+of the two other sequential snapshots on this same market that guessed
+without a dated figure and both lost as forecasts — the veto still
+correctly avoided capital risk on a narrative/trend-extrapolation class
+that is net-negative lifetime even after these two wins.
+
+**Operator-machine 03:40Z cycle (RETRO-20260904-0340), merged by the operator 2026-09-04 after the two runners diverged:** its e398cebab2e6 row is the same row as in the 04:13Z table above and is counted once in the totals. It pre-registered sub-class
+`countable-metric` (any veto row whose note cites a dated primary count on
+a live countable metric: views, downloads, followers, on-chain counts):
+now 1W/0L, +4.26u; grade for a carve-out at n≥3 settled rows, veto
+unchanged until then. Rows without a dated count stay narrative class.
+
+**Cumulative-count anchor rule (DEEP-2026-09-04, from the four settled
+snapshots above plus b3fbd3c3eef7/944d8e5fc4d0):** a forecast on a
+cumulative-count market (views, downloads, signatures, cumulative sales)
+requires a DATED count plus an observed per-day pace, exactly as same-day
+weather rows require the observed partial-day max. The settled split is
+stark: the two snapshots with no dated figure scored brier 0.3025
+(b5c5c134d7cb, "coin-flip with a fig-leaf of numbers") and 0.7225
+(b3fbd3c3eef7, est 0.85 on <20M while the count was climbing through
+17M — it followed the market's re-pricing and called it confirmation);
+the one snapshot with a dated anchor (~17M at day 5-6, ~3.4M/day) scored
+0.09 (e398cebab2e6). If no dated count is findable, record NO forecast
+(skip reason `no-anchor`) rather than a number — an unanchored estimate
+here contaminates calibration stats the same way a half-observed day did
+in weather. Market-agrees re-pricing is NOT an anchor: on a trending
+count the market re-pricing toward your prior is what being late looks
+like.
+
+**2026-09-04 update (LIGHT tick 06:29Z, settled by resolve.py; 4 rows,
+two OpenAI Astra release-timeline markets, two sequential snapshots
+each):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Astra by-Sep3 (925eb1c697f9) | 0.20 / 0.87 | No | +0.660 | No | **+6.14** |
+| Astra on-Sep3 (b1d2b955da88) | 0.18 / 0.8305 | No | +0.632 | No | **+4.32** |
+| Astra by-Sep3 re-check (cfda85a4abde) | 0.15 / 0.885 | No | +0.730 | No | **+7.33** |
+| Astra on-Sep3 re-check (a8d12b4831b4) | 0.80 / 0.944 | No | +0.140 | No | **+15.67** |
+
+Net this batch: **+33.46u** (4W/0L). **Totals now 89 realizable trades,
+43W/46L, net +15.39u** — the ledger's first-ever positive cumulative
+total. Side split re-summed row-by-row: **Yes-side unchanged 3W/20L,
+−15.75u**; **No-side 40W/26L, +31.14u** (adds this batch's 4W/0L,
++33.46u). Check: −15.75 + 31.14 = 15.39 ✓. Both markets resolved No
+(Astra did not clear each market's specific by/on-Sep3 public-access
+bar in time) against books priced 83–94c Yes; the fact-finality gate
+(DEEP-2026-08-30) correctly avoided capital on all four snapshots but
+this is the single largest realizable-edge miss in the table by a wide
+margin, driven almost entirely by a8d12b4831b4's 6c No ask on a
+near-certain-looking Yes book. n=2 distinct markets (4 snapshots) is
+not grounds to loosen the gate — the same family's earlier by-Sep2 leg
+(2daa083970d8, not in this table, already lost as a straight forecast)
+and the wider Yes-side 3W/20L record argue the opposite direction on
+timeline-rumor markets generally; full grading in
+RETRO-20260904-0629.
+
+**Touch-family gate CLOSED (DEEP-2026-09-01; pre-registered 2026-08-28
+21:35Z, all 3 legs settled):** leg 3 BTC dip-$75k (753366c2ea8e,
+measured-vol, est 0.38 vs mid 0.315) LOST — final record ETH dip-2400
+measured-vol WON (brier 0.040 vs mkt 0.106), BTC-82k guessed-vol LOST
+(0.203 vs 0.068), BTC dip-75k measured-vol LOST (0.144 vs 0.099).
+Aggregate brier: own 0.129 vs market 0.091 — the market won the family.
+All three own reads sat above market and 2 of 3 resolved No, but the leg
+with the largest above-market gap won, so the vol-overstatement signature
+is suggestive, not confirmed. **Ruling:** the crypto touch/reflection
+family stays `unvalidated-method` forecast-only — no bets. Guessed-vol
+inputs are RETIRED from this family: any future touch forecast must use
+measured realized vol or market-implied vol from an adjacent ladder rung
+(guessed-vol is 0W/1L live, and the superseded guessed-vol ETH row
+d2431685b1a3 won with a brier 2.3× worse than its measured-vol
+replacement — it has never outperformed the market or its measured
+sibling). Re-grade the family at n≥6 settled measured-vol rows (currently
+1W/1L: edd6af85d6a6 W, 753366c2ea8e L).
+
+**2026-09-21 12:24Z update (RETRO-20260921-1224; re-grade counter pinned,
+family shade dropped):** RETRO-20260921-1025 counted the family by label
+(every crypto-touch `unvalidated-method` row) and reached "n=5, re-grade at
+the next settlement". Three of those rows (`07a247cac126` guessed sigma,
+`a28637cb4026` swept sigma, `3acf7b55a29f` no model) are outside the
+pre-registration above. The counter, from now on:
+
+- A row counts only if its note quotes a measured realized vol or a
+  market-implied vol with a named, dated source. Labels do not count rows.
+- Sibling rungs of one asset and one window, recorded from the same vol
+  input, count as ONE decision (score them all, count them once).
+- A row recorded with the barrier within 0.5% of spot is listed but carries
+  no weight.
+
+Tally at this commit: 5 settled measured rows, 4W/1L, own Brier sum 0.4786
+vs market 0.6005 (own ahead by 0.1219): `edd6af85d6a6` W, `753366c2ea8e` L,
+`fde4324641b4` W (0.03% gap, no weight), `bad4649e1e7a` + `423dd881047b` W
+(one decision, BTC reach Sep). That is 4 decisions, 3 informative. Open
+measured rows, all settling by 2026-10-01 04:00Z: `854536ded8be`,
+`942876f92dd8`, `10f71ccecca3`, `cbc8303dc2a8`. The re-grade runs in the
+retro of the tick that settles the 6th measured row, and splits reach rows
+from dip rows (a month of rising prices flatters every reach read).
+
+Shade: a touch row records the `touch.py` output at the measured vol. The
+"family's above-market record" shade toward the 0.75x-vol reading is
+dropped: on measured rows the above-market reads went 4 for 5, the shade
+cost 0.070 (`423dd881047b`) and 0.015 (`bad4649e1e7a`) Brier, and a shaded
+row no longer tests the method the re-grade is about. A shade needs a
+row-specific reason in the note. Forecast-only ruling unchanged: no bets.
+
+**2026-09-25 22:13Z (RETRO-20260925-2213): an inferred open is not a
+measured input.** Single-stock touch rows record `touch.py` from the last
+close, or from an actually quoted premarket print. An open inferred from
+index futures x beta goes in the note as "shade view: X", never into
+est_prob. Evidence: PLTR HIGH $195 `a468e40297ae` recorded 0.74 (between
+0.678 from the close and 0.864 from an NQ-beta open), no touch, dBrier
++0.293 vs mid 0.505; the overlay alone cost 0.088. A shade grounded in a
+measured print (SPY LOW $760 `23a99c8fe4e8`, ES overnight + RTH-only
+window, 0.118 -> 0.08) helped by 0.0075. equity-touch now n=2, dBrier
++0.163: forecast-only, no bets.
+
+**2026-09-21 20:44Z update (RETRO-20260921-2044; far-barrier split added):**
+`8d1eb46b7c32` (ETH reach $2,800, own 0.25 vs mid 0.155) settled WON, dBrier
+-0.1515. Listed, NOT counted: its note sweeps sigma 50-90%, no measured
+input. Tally unchanged (5 rows, 4 decisions, 3 informative). Hindsight
+`touch.py` on the record-date inputs at measured Binance vol (30d 0.454,
+14d 0.491) gives 0.11-0.14, UNDER the 0.155 mid, on a 15% barrier that fell
+to one +7% day: the driftless tool has no jump term and the book prices far
+barriers above it (same gap on open `cbc8303dc2a8`). n=1, no ruling change.
+The re-grade therefore splits rows twice: reach vs dip, AND barrier gap at
+record time under 10% vs 10% or more. Open measured rows now:
+`854536ded8be`, `942876f92dd8`, `10f71ccecca3`, `cbc8303dc2a8`,
+`86415cf1e27f`. `395a07f3f815` (ETH $3,200, guessed vol) is outside the
+counter.
+
+**2026-09-23 08:10Z (RETRO-20260923-0810): WTI September ladder listed.**
+The five-rung WTI ladder (`18672a24a234`, `98134efdddcf`, `0ad60d107c54`,
+`52fac91e76d7`, `41c92e76901c`) quotes a market-implied vol with a named,
+dated source (OVX 57.49, FRED OVXCLS Sep 16), so it qualifies; one asset,
+one window, one vol input makes it ONE open decision, counted when its
+last rung settles (~Oct 1). Settled so far: LOW95 W and LOW90 W, both
+above market, dBrier sum -0.0660. Tally of settled decisions unchanged.
+
+**2026-09-23 15:0xZ RE-GRADE (RETRO-20260923-1500; 6th and 7th measured
+rows settled):** `820604783edf` (ETH dip $2,700, own 0.90 vs mid 0.94,
+gap 0.82%) and `c07c05bc24af` (BTC dip $85k, own 0.93 vs mid 0.9415, gap
+0.52%) both WON; both unshaded, measured Binance 30d vol, two assets so
+two decisions. Tally: 7 rows, 6 decisions, 5 informative (`fde4324641b4`
+carries no weight). Row Brier own 0.4935 vs market 0.6074 (own ahead
+0.114). Splits:
+- Dip (4 decisions): own 0.1993 vs mkt 0.2118, own ahead 0.0125, but the
+  market was closer on 3 of 4; `edd6af85d6a6` alone carries the lead.
+- Reach (1 decision, the BTC Sep 82.5k/85k pair, both shaded): own 0.2941
+  vs mkt 0.3956. One correlated decision in a rising month.
+- Far barrier (gap 10% or more): no counted rows. Untested.
+- Direction: own above market 3 times (2W/1L), below market 2 times
+  (both resolved Yes, market closer both times).
+Decision-weighted (sibling rows averaged): own 0.3464 vs mkt 0.4096, but
+only 2 of 5 informative decisions beat the market.
+**Ruling:** stays `unvalidated-method`, forecast-only, no bets. The
+aggregate lead rests on two decisions (`edd6af85d6a6` and the reach
+pair); the other three went to the market, and the far-barrier and
+multi-decision reach cells are empty. Pre-registered NOW, so the next
+grade cannot be post hoc: promote to a bettable edge class only if, at
+10 or more informative decisions, (a) decision-weighted Brier beats the
+market in BOTH the reach and the dip split with at least 3 decisions
+each, and (b) own beats the market on at least 60% of decisions. Until
+then keep recording every scan-surfaced qualifying row, unshaded, and
+keep splitting near/far barrier.
+
+**2026-09-24 DEEP re-grade (8th and 9th measured rows; settled by the
+deep retro's own resolve run at ~04:3xZ, so no hourly retro graded
+them).** `6c1236ca11fe` (BTC dip $83k on Sep 23, own 0.24 vs mid
+0.2055) and `8a4bb9cfde9c` (ETH dip $2,600 on Sep 23, own 0.09 vs mid
+0.085) both LOST (no dip); both unshaded, measured Binance 30d vol, two
+assets so two decisions, both near-barrier dips (gap ~3%). Market closer
+on both (row dBrier +0.0154 / +0.0009). Tally: 9 rows, 7 informative
+decisions; own beats the market on **2 of 7**. Dip split: 6 decisions,
+own closer on 1. Direction pattern: own ABOVE market on all 4 intraday
+dip reads since 09-17 and the market was closer on 3 of them — the
+unshaded 30d-realized-vol reflection read slightly overstates same-day
+touch odds (n=4, pattern only, not a rule).
+**Bar arithmetic, stated so nobody grades it hopefully later:** at 10
+informative decisions the best possible own-closer count is 5/10 = 50%,
+below the 60% bar in (b). The 10-decision promotion is now unreachable;
+it would take 13 straight own-closer decisions to reach 60% at any n.
+**Ruling:** stays `unvalidated-method`, forecast-only, indefinitely. Keep
+recording scan-surfaced rows (cheap, and the WTI ladder decision is
+still open ~Oct 1), but do NOT spend research priority on generating new
+touch rows — priority 1 "feed the measured-row counter" (15:00Z
+2026-09-23 funnel note) is retired. The family matches the market; it
+does not beat it.
+
+**2026-09-25 12:0xZ tally (RETRO-20260925-1207; 10th and 11th measured
+rows).** `4cf126698087` (SOL reach $120 Sep, own 0.83 vs mid 0.808, gap
+2.2%, CoinGecko 31d vol) and `e9398115e4ad` (BTC reach $85k from Sep 23,
+own 0.91 vs mid 0.83, gap 0.60%, Binance 30d vol) both WON, both
+unshaded, own closer on both (dB -0.0080 / -0.0208). Two assets, and the
+BTC market has its own window (created Sep 23), so two decisions. Tally:
+11 rows, 9 informative decisions, own closer on 4 of 9. Reach split: 3
+decisions, own closer on all 3; dip split: 6 decisions, own closer on 1.
+All three reach wins came in a rising month and all near-barrier, so the
+split is the pattern to watch, not a licence. Bar arithmetic corrected:
+the "13 straight" figure above was computed at 2 of 7. At 4 of 9, four
+more own-closer decisions in a row reach 8/13 = 62%, so criterion (b) is
+reachable again; criterion (a) still needs the dip split to beat the
+market on decision-weighted Brier. Ruling unchanged: forecast-only
+"indefinitely" stands until a deep retro re-grades against the full
+pre-registered bar, and a reach-only slice never re-opens it.
+
+Excluded per the sub-boundary taxonomy (DEEP-2026-08-15): Zambia
+(fa185b55a5c3, edge 0.06) and Musk wk 200-219 (7808b6f5a4ef, edge 0.045)
+both settled this tick too, but both carry claimed edges ≤0.10 under a
+blanket category bar (elections; social-media-postcount respectively) —
+the bar, not the numeric veto, is the operative decline reason, so they
+grade their category narratives (§Extension to general elections; the
+bootstrap fork below), not this ledger. Same treatment already applied to
+140-159 (70331099597c) and the still-open 160-179 (c24926a5c9d7). Same
+exclusion again 2026-08-21: this week's Musk wk 260-279 (42dc4279d3b9,
+edge 0.05, category-bar) settled LOST but is off-ledger for the same
+reason — the blanket bar, not the veto, is what declined it. Excluded
+again 2026-08-26 (RETRO-20260826-0528): WI Hong 10-15% (03901079bd63) —
+est (0.090) sits on the market mid (0.089), and the fill-price check shows
+negative edge both sides (Yes 0.090−0.107=−0.017; No 0.910−0.929=−0.019),
+so there is no realizable disagreement at all, not merely one under the
+0.10 bar — same non-trade treatment as the PPI 5.4%/≥6.0% rows.
+
+**2026-08-26 update (05:28Z settlement): six-row Wisconsin Hong
+margin-of-victory bracket batch settled, all No (Hong lost the primary
+outright).** 3W (No side, small longshot-payout profits: +0.08+0.09+0.25 =
++0.42u) / 3L (Yes side, all −1.00u) — a clean, uncorrelated confirmation of
+the existing pattern: every Yes-side disagreement in this batch lost,
+every No-side disagreement won. **Totals now 30 realizable trades, 11W/19L,
+net −12.00u**; side split re-summed row-by-row over the full table:
+**Yes-side 1W/12L, −10.50u** (three new losses, no new wins — extends the
+Yes-side lifetime record to 1-for-13); **No-side 10W/7L, −1.50u** (three
+new wins — the No-side hit rate is now a genuine majority, 59%, even
+though the side stays net-negative in dollars because longshot-No fills
+pay little on a win and the earlier No-side losses were larger stakes at
+worse prices). Check: −10.50 + −1.50 = −12.00 ✓. No playbook rule change
+from this row alone (see RETRO-20260826-0528) — the widened Yes-side split
+is flagged for the next deep retro's Yes/No-side asymmetry discussion, not
+acted on here.
+
+**2026-08-26 update (17:12Z settlement): Kuala Lumpur 30C weather row
+added, first settled row from the new weather category (exploration
+budget, DEEP-2026-08-25 22:xxZ); Beijing 26C sibling settled the same tick
+but is EXCLUDED from this table — est 0.23 vs ask 0.23/bid 0.21 leaves no
+realizable edge either side (Yes: 0.23−0.23=0.00; No: 0.21−0.23=−0.02),
+same non-trade treatment as WI Hong 10-15%.** KL: est 0.26 (Yes) vs ask
+0.079, edge +0.181, actual high was NOT 30C → Yes lost, −1.00u. The
+directional read matters more than the single row: the market priced the
+30C bucket at just 0.073 against my model's 0.26-0.28 (implied warmer
+actual than my open-meteo N(30.65,1.2) mean), and the market was right —
+supports hypothesis (a) from the exploration-budget note (my model reads
+systematically cool / too-coarse), not hypothesis (b) (thin-market
+mispricing). Beijing, the one city where my model and the market had
+already agreed almost exactly (0.228 vs 0.22), losing on its minority
+bucket is uninformative either way. Totals at that point: 31 realizable
+trades, 11W/20L, net −13.00u; Yes-side 1W/13L −11.50u; No-side 10W/7L
+−1.50u. New generation class: weather Gaussian (self-modeled sd,
+unvalidated) 0W/1L −1.00u.
+
+**2026-08-26 update (23:19Z settlement): Amsterdam 25C weather row added —
+the other open row from this batch (the Spider-Man BND sibling settles
+separately, not part of the weather-Gaussian class).** No side, est 0.87 vs
+ask 0.56 (edge +0.31), actual result No (25C did NOT occur) → **won**, CF
+P&L +0.79u. This is NOT a same-direction replicate of KL — see the
+exploration-budget section above for the correction (Amsterdam's market
+mode, 25C, was *below* the model's mean, opposite of KL where the market's
+mode was *above* — the two rows disagree, not confirm each other, and no
+category verdict follows from this n=2). **Totals now 32 realizable
+trades, 12W/20L, net −12.21u**; side split re-summed row-by-row over the
+full table: **Yes-side unchanged 1W/13L, −11.50u**; **No-side 11W/7L,
+−0.71u** (one new win, +0.79u vs the prior −1.50u). Check: −11.50 + −0.71 =
+−12.21 ✓. Weather-Gaussian generation class now 1W/1L, net −0.21u (was
+0W/1L, −1.00u).
+
+**2026-08-27 update (DEEP retro): six rows added that the hourly cycles
+settled but never entered — Crowley (07:28Z, no retro written), the three
+PCE MoM legs (15:21Z retro graded them but skipped the same-commit table
+duty), and the BoK pair (04:13Z, logged "at-market/veto-correct" with no
+retro when the vetoed read had in fact WON — see reconcile.py check 5,
+welded off the back of exactly these three misses).** Row notes:
+Crowley is the day's ugliest row — the same single-poll margin model that
+generated the Hong brackets put 0.0012 on the man who actually won the
+primary at a market 0.032; the No-side fill edge (+0.011) was tiny but
+positive, so it enters as a No-side LOSS, a reminder that the No side of a
+bad model is still the bad model. PCE MoM 0.2% (+0.014 edge) is effectively
+at-market and enters only for convention's consistency (any positive
+fill-price edge enters; the WI 15-20% row at +0.023 set the floor).
+The BoK pair is ONE underlying decision (complementary books, same
+convention as the Musk 2-day and Japan GDP pairs — both rows enter the
+table, ONE independent event for any evidence-counting): the analyst-poll
+Gaussian-free read (est hike 0.60 vs market 0.32, recorded five days
+early) was RIGHT against a confident market, the largest counterfactual
+win this ledger has ever recorded (+2.03/+2.13u on the two legs of the one
+trade). score.py buckets the pair under `revised_away` (both legs were
+superseded to market-agrees rows at 01:25Z after live-CLOB convergence,
+hours before on-chain settlement) — the supersede was correct hygiene, but
+the counterfactual grades the ORIGINAL record-time book, where the edge
+was real and realizable.
+
+**Totals now 38 realizable trades, 16W/22L, net −9.01u.** Side split
+re-summed row-by-row: **Yes-side 3W/14L, −9.75u** (adds BoK hike W +2.03,
+PCE 0.2% W +0.72, PCE 0.1% L −1.00); **No-side 13W/8L, +0.74u** (adds BoK
+hold W +2.13, PCE 0.3% W +0.32, Crowley L −1.00) — the No side crosses
+into positive territory for the first time. Check: −9.75 + 0.74 = −9.01 ✓.
+
+**2026-08-28 update (16:18Z, LIGHT tick, RETRO-20260828-1618): UMich
+Consumer Sentiment FINAL settled (final print 51.7, in-bracket for
+49.0-51.9).** Two outside-view-veto rows enter this table. UMich <49.0
+(a5703b36d60a): model P(Yes)=0.334 vs live ask 0.177, Yes side, fill-price
+edge +0.157 (est − ask); actual No → **lost, −1.00u**. UMich 49.0-51.9
+(fdfd9e781481): model P(Yes)=0.321 vs live bid 0.38, No side (model
+favored No since est sits below the bid), fill-price edge = bid − est =
+0.38−0.321 = +0.059; actual Yes (the final print landed in this exact
+bracket) → the No side **lost, −1.00u** — the veto correctly avoided this
+loss, same shape as the BTC touch-$80k and Japan GDP-veto precedents. The
+sibling 55.0-57.9 row (81af56a9a430, wide-spread-veto) is EXCLUDED, not
+entered: fill-price check both sides negative (Yes: 0.087−0.14=−0.053; No:
+(1−0.087)−(1−0.04)=0.913−0.96=−0.047) — est sits inside the bid/ask
+spread, no realizable disagreement either side, same non-trade treatment
+as WI Hong 10-15% and the PPI 5.4%/≥6.0% rows. The other four UMich
+brackets (6e1ba0c74bf2, a1f502906022, 3e269764b9e6, d5dcc12cdabe) settled
+no-edge, not entered per the standing rule. **Totals now 40 realizable
+trades, 16W/24L, net −11.01u.** Side split re-summed row-by-row over the
+full table: **Yes-side 3W/15L, −10.75u** (adds UMich <49.0 L −1.00);
+**No-side 13W/9L, −0.26u** (adds UMich 49.0-51.9 L −1.00, pulling the No
+side back to net-negative after one tick at +0.74u). Check: −10.75 + −0.26
+= −11.01 ✓.
+
+**Mechanical-econ fork bookkeeping correction (same tick):** the Canada
+GDP set (6 rows, ab9d001c5d8a/834d675fc7e8/c6803f47d674/e2bbfd112771/
+6b02ffb04b9a market-agrees, fe954ed9f325 excluded as a pre-registered
+process error) also settled this tick — **every row was market-agrees;
+none crossed the >0.10 outside-view boundary, so the veto never fired and
+the print contributes ZERO rows to this counterfactual ledger.** This
+contradicts the Aug 17 fork pre-registration's framing of Canada GDP as
+automatically "a fourth event" — a settled mechanical-econ print with no
+disagreement is not a veto-boundary test at all, it's simply an instance
+where the self-model and the market agreed. The two UMich veto rows added
+above ARE a new independent mechanical-econ-Gaussian veto event (net
+−2.00u, 0/2 on this print) but were never named in the original Aug 17
+fork queue (only PCE, BoK, and Canada GDP were). Net effect: the fork
+still has exactly 3 named-and-fired events (Japan GDP, PCE, BoK, net
++2.92u, 3/3 dBrier) plus one unplanned fourth (UMich, net −2.00u, 0/1
+dBrier this print) — the deep retro due DEEP-2026-08-28/29 must decide
+with this corrected picture, not the "Canada GDP adds a fourth event"
+assumption baked into the original registration. Not acting on the fork
+here per the standing rule (hourly cycles extend the table, do not decide
+it).
+
+**The Yes/No asymmetry discussion RETRO-20260826-0528 flagged for this
+deep retro, resolved: the asymmetry is a CLASS effect wearing a side
+costume.** Before today the split read Yes 1W/13L vs No 11W/7L, which
+tempts a side rule ("stop trusting Yes-side disagreements"). Today's two
+Yes-side wins (BoK hike, PCE modal bucket) are both mechanical-econ rows
+with named external benchmarks, and the historical Yes-side graveyard
+(Musk brackets, TI, box-office, WI Hong upside legs) is almost entirely
+behavioral self-models — the side was proxying for the generation class.
+No side rule is written; the mechanical-vs-behavioral carve-out fork
+(below) is the correct instrument, and it already exists with a
+pre-registered decision date.
+
+**Mechanical-econ fork running tally (decision due DEEP-2026-08-28/29 as
+pre-registered — NOT today; Canada GDP settles Aug 28 and adds a fourth
+event):** Japan GDP +0.85u (agent ahead on dBrier), PCE MoM +0.04u net
+across the three legs of one print (agent ahead, 0.244 vs 0.264 summed
+Brier), BoK +2.03u counting the one trade once (agent ahead, 0.16 vs 0.46
+on the hike leg). Three independent settled events, net **+2.92u**, agent
+ahead on dBrier in 3/3 — the fork's ≥3-events / net-positive / dBrier-
+majority condition is currently MET. Tomorrow's deep retro makes the call
+with Canada GDP in hand; firing it a day early on the strongest print in
+the sample (BoK, hours old) is exactly the hot-streak overreaction the
+pre-registration exists to prevent.
+
+**FORK DECIDED — DEEP-2026-08-28.** Corrected inputs at decision time:
+Canada GDP contributed ZERO fork events (no veto fired — every row
+market-agrees, per the Aug-28 bookkeeping correction above), and UMich
+fired as an unplanned fourth event at −2.00u, agent behind on dBrier
+(0/2 rows). Tally: including UMich 4 events net +0.92u dBrier 3/4;
+excluding it 3 events +2.92u 3/3. The pre-registered condition (≥3
+events, net counterfactual > 0, dBrier majority) is met on BOTH
+readings, so the carve-out fires as registered. UMich shapes the gate
+rather than blocking the decision: its Gaussian was self-built off the
+prelim with a property-2 failure recorded at forecast time (no reachable
+variance benchmark) — a self-model in econ clothing, exactly what the
+registered candidate shape ("named external survey benchmark") already
+excluded. See §Mechanical-econ carve-out below for the enacted rule and
+its kill switch.
+
+**2026-09-04 update (16:13Z, FULL cycle, RETRO-20260904-1613): four
+Aug23-vintage NFP bracket rows settled (superseded by the Sep4 revision,
+graded on their record-time book per standing convention). Actual print:
+NFP >= 150k jobs added (a large beat).**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| NFP add 0-50k (d2c8054e1df6) | 0.1794 / 0.265 | No | +0.071 | No | **+0.33** |
+| NFP add 50-100k (7800470f6fab) | 0.218 / 0.315 | No | +0.082 | No | **+0.43** |
+| NFP add 100-150k (adc70585857a) | 0.1963 / 0.141 | Yes | +0.055 | No | −1.00 |
+| NFP add >=150k (a8a368a644f4) | 0.2266 / 0.145 | Yes | +0.082 | **Yes** | **+6.14** |
+
+Net this batch: **+5.90u** (3W/1L). **Totals now 93 realizable trades,
+46W/47L, net +21.29u.** Side split re-summed row-by-row: **Yes-side
+4W/21L, −10.61u** (adds 100-150k L, >=150k W); **No-side 42W/26L,
++31.90u** (adds 0-50k W, 50-100k W). Check: −10.61 + 31.90 = 21.29 ✓.
+Ruling: the veto correctly avoided three losing legs, but the >=150k leg
+it also declined would have been the single largest win in this table —
+the batch nets positive only because that leg happened to hit, which is
+outcome luck on a >0.10 disagreement, not method vindication (full
+grading in RETRO-20260904-1613, which also covers the two standard-floor
+bets on the same print).
+
+**2026-09-04 update (18:13Z, LIGHT tick, RETRO-20260904-1813): one
+same-day weather row settled.**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Shanghai 31C weather (6aff2db6ddbe) | 0.58 / 0.885 | No | +0.280 | Yes | −1.00 |
+
+**Totals now 94 realizable trades, 46W/48L, net +20.29u.** Side split
+re-summed row-by-row: **Yes-side unchanged 4W/21L, −10.61u**; **No-side
+42W/27L, +30.90u** (adds this loss). Check: −10.61 + 30.90 = 20.29 ✓.
+Ruling: model was directionally right (est 0.58 > 0.5) but less
+confident than the market's 0.885 given the same partial-day data —
+the relative-value No side lost; weather stays no-bet, no gate change
+at n=1 (full grading in RETRO-20260904-1813).
+
+**2026-09-04 update (22:11Z, LIGHT tick, RETRO-20260904-2215): five
+Astra by-date rows settled, all No-side, all LOST — the family's first
+losses ever (previously 5W/0L, by-Sep2 + the by/on-Sep3 batch above).**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Astra by-Sep4 (99d1545b2ec7) | 0.08 / 0.863 | No | +0.783 | Yes | −1.00 |
+| Astra by-Sep5 (7adc67fe86cc) | 0.18 / 0.685 | No | +0.505 | Yes | −1.00 |
+| Astra by-Sep6 (b249eb7256a0) | 0.28 / 0.64 | No | +0.360 | Yes | −1.00 |
+| Astra by-Sep7 (d179339fe4c0) | 0.35 / 0.525 | No | +0.175 | Yes | −1.00 |
+| Astra by-Sep15 (037ae430d6f3) | 0.80 / 0.885 | No | +0.085 | Yes | −1.00 |
+
+Net this batch: **−5.00u** (0W/5L). **Totals now 99 realizable trades,
+46W/53L, net +15.29u.** Side split re-summed row-by-row: **Yes-side
+unchanged 4W/21L, −10.61u**; **No-side 42W/32L, +25.90u** (adds this
+batch's 0W/5L, −5.00u). Check: −10.61 + 25.90 = 15.29 ✓. Ruling: the
+first three rows' rationale text cited a market price (0.14/0.315/0.36)
+that does NOT match the `best_bid_at_record`/`best_ask_at_record` those
+same forecast.py calls actually stamped (0.863/0.685/0.64) — the live
+book had already repriced 50+ points same-day and the note never
+reflected it; graded against the true recorded book the "modest" declined
+edges were actually 0.36–0.78. The other two rows (by-Sep7, by-Sep15)
+quoted the price correctly and still lost — clean misses, gate worked as
+designed, zero capital risked on any of the five. Full grading and the
+new estimation-method fix (quote the exact bid/ask about to be recorded,
+inside the rationale) in RETRO-20260904-2215.
+
+**2026-09-05 update (00:12Z resolve.py, RETRO-20260905-0016; three
+outside-view-veto rows settled, all No-side, all LOST as counterfactual
+trades — three more losses avoided.** GPT-6-by-Sep15 (`44a62d640ae1`, the
+live re-check that supersedes `846f0e23a43a` — only the live row enters,
+per the revised-away convention score.py already applies) and Astra
+on-Sep4 (`17db5ec8f494`) both trace the same rumor/phased-rollout shape
+already dominant in this table; Munich 30C (`355715e4ce82`) is a same-day
+weather-Gaussian row, sibling of the Shanghai 31C loss two updates above.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| GPT-6 by-Sep15 (44a62d640ae1) | 0.46 / 0.87 | No | +0.40 | Yes | −1.00 |
+| Astra on-Sep4 (17db5ec8f494) | 0.92 / 0.852 | No | +0.067 | Yes | −1.00 |
+| Munich 30C weather (355715e4ce82) | 0.28 / 0.565 | No | +0.28 | Yes | −1.00 |
+
+Net this batch: **−3.00u** (0W/3L). **Totals now 102 realizable trades,
+46W/56L, net +12.29u.** Side split re-summed row-by-row: **Yes-side
+unchanged 4W/21L, −10.61u**; **No-side 42W/35L, +22.90u** (adds this
+batch's 0W/3L, −3.00u). Check: −10.61 + 22.90 = 12.29 ✓. Ruling: no
+boundary change at this n — GPT-6/Astra extend the already-dominant
+rumor/phased-rollout No-side pattern, Munich extends the same-day
+weather-Gaussian family (now 2 of its last 2 settlements as avoided
+No-side losses); full grading in RETRO-20260905-0016.
+
+**2026-09-05 update (06:12Z resolve.py, LIGHT tick; one outside-view-veto
+row settled, Yes-side, LOST as a counterfactual trade — one more loss
+avoided.** Miami 92-93°F next-day weather bracket (`0b7b13d60127`): a
+same-day weather-Gaussian row, sibling of the Munich 30C avoided loss two
+updates above, but Yes-side (own est 0.11 above the 0.06 mid, mech
+`superforcaster-market-aware` 0.26 with a leaked-price caveat) rather than
+No-side.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Miami 92-93F weather (0b7b13d60127) | 0.11 / 0.06 | Yes | +0.040 | No | −1.00 |
+
+Net this batch: **−1.00u** (0W/1L). **Totals now 103 realizable trades,
+46W/57L, net +11.29u.** Side split re-summed row-by-row: **Yes-side
+4W/22L, −11.61u** (adds this batch's 0W/1L, −1.00u); **No-side unchanged
+42W/35L, +22.90u**. Check: −11.61 + 22.90 = 11.29 ✓. Ruling: no boundary
+change at n=1 — extends the same-day weather-Gaussian family to 3-for-3
+avoided losses across both sides (Shanghai 31C No-side, Munich 30C
+No-side, Miami 92-93F Yes-side); full grading in
+RETRO-20260905-0612. Mechanical ledger's outside-view-veto line as of
+this update: 106 CF trades, 46W/60L, +$82.17 ≙ +16.4u, brier_delta
++0.0280, held-out +$111.17.
+
+**Accounting convention (DEEP-2026-09-05, per operator note 2026-09-04
+~23:20Z): `python3 core/counterfactual.py ledger` is the record; this
+hand table is the narrative.** Every future retro that extends this
+table also quotes the mechanical ledger's outside-view-veto line
+(currently: 106 CF trades, 46W/60L, +$82.17 ≙ +16.4u, brier_delta
++0.0280, held-out +$111.17). The hand table reads +11.29u on 103 trades
+because 8 of its rows are trades the protected caps would refuse
+(entries ≥0.96 or no bid at record) and some older rows grade edge
+against the mid instead of the fill; when the two disagree, the
+mechanical ledger wins. Interpretation stays the operator's gnhf-run-4
+verdict: the positive CF P&L is one family (Astra snapshots, +34u of
+the total; without it the vetoed trades lose), the vetoed beliefs are
+worse-calibrated than the market (+0.028), the veto stays.
+
+**2026-09-05 update (14:12Z resolve.py, LIGHT tick; two `wide-spread-veto`
+forecasts settled — first wide-spread-veto batch to enter this table
+since the Aug14 correction.** Both rows are the same LCK UBF Gen.G vs
+Hanwha Life Esports Bo5 (decided 3-1, 4 games total), researched and
+vetoed together at 2026-09-02T12:46:38Z. Both legs' directional read was
+correct (Over on O/U3.5, Under on O/U4.5), but the mechanical fill
+arithmetic uses each row's own recorded `best_ask_at_record` (0.77 and
+0.39 respectively), not the book snapshot quoted in the O/U3.5 note
+(ask 0.39, implying an apparent +0.26 edge) — the two don't match, a
+one-off timing/recording gap between the manual spread-check and
+forecast.py's own capture, not yet a pattern (n=1, watch for recurrence
+before proposing anything).
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| GenG-HLE O/U3.5 (bf608b923988) | 0.65 / 0.40 | Yes | −0.120 | Yes | +0.30 |
+| GenG-HLE O/U4.5 (5b76118ad958) | 0.716 / 0.79 | No | −0.106 | Yes | −1.00 |
+
+Net this batch: **−0.70u** (1W/1L). **Totals now 105 realizable trades,
+47W/58L, net +10.59u.** Side split re-summed row-by-row: **Yes-side
+5W/22L, −11.31u** (adds this batch's 1W/0L, +0.30u); **No-side 42W/36L,
++21.90u** (adds this batch's 0W/1L, −1.00u). Check: −11.31 + 21.90 =
+10.59 ✓. Both legs' realizable edge is negative against the recorded ask
+despite the directional read being right on both — the wide-spread
+veto's arithmetic justification (crossing the spread erases the apparent
+edge) holds even on a batch where the underlying model call was correct.
+Ruling: no boundary change at n=2, consistent with the Aug14 correction's
+"get the arithmetic right, not a narrative verdict" instruction. Full
+grading in RETRO-20260905-1412. Mechanical ledger's wide-spread-veto line
+as of this update (`core/counterfactual.py ledger --skip-reason
+wide-spread-veto`): 4 settled declined forecasts, 3 fillable CF trades,
+1 refused, 2W/1L, pnl −$2.82 (staked $15.00), brier_delta −0.0553,
+held-out −$2.83. The outside-view-veto line is unchanged this update:
+106 CF trades, 46W/60L, +$82.17 ≙ +16.4u, brier_delta +0.0280, held-out
++$111.17.
+
+**Countable-metric trigger status (DEEP-2026-09-05): fired on the
+letter, held shut.** The operator's pre-registered narrowing trigger
+(5 settled countable-metric rows, negative brier_delta, positive pnl on
+3 of 4 held-out folds) is numerically met (n=5, 4W/1L, +$61.68, dBrier
+−0.1367, folds [+6.90, +33.46, +5.00, +21.32, −5.00]) — but all five
+rows are snapshots of ONE event (the GTA VI Extended Look view-count
+family: `b5c5c134d7cb`, `b3fbd3c3eef7`, `944d8e5fc4d0`, `e398cebab2e6`,
+`e441fa8f0f8a`), the same one-family/held-out artifact the operator
+flagged on Astra. No carve-out opens on a single event. Operator ask
+filed (proposals.md 2026-09-05) to amend the trigger to require ≥3
+independent events; quote the countable-metric line each deep-retro
+pass until it is answered.
+
+**2026-09-05 update (20:12Z resolve.py, LIGHT tick; 1 `outside-view-veto`
+forecast settled.** Guangzhou 35°C same-day exact-temp bracket
+(`eb95af0bfe24`, researched 08:22Z): own post-obs est 0.82 vs mid 0.9665
+(recorded `market_prob_at_record` 0.927), model's No-side belief (0.18)
+well above the market's implied No (~0.033) — outside-view-veto
+declined a bet either way (self-modeled in-progress trend, not
+fact-final). Settled Yes, so the declined No-side counterfactual trade
+lost.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Guangzhou 35°C same-day weather (eb95af0bfe24) | 0.82 / 0.9665 | No | +0.076 | Yes | −1.00 |
+
+Net this batch: **−1.00u** (0W/1L). **Totals now 106 realizable trades,
+47W/59L, net +9.59u.** Side split re-summed row-by-row: **Yes-side
+unchanged 5W/22L, −11.31u**; **No-side 42W/37L, +20.90u** (adds this
+batch's 0W/1L, −1.00u). Check: −11.31 + 20.90 = 9.59 ✓. Ruling: no
+boundary change at n=1 — same-day weather family now 1W/3L in this
+table's realizable arithmetic (Shanghai/Munich/Miami avoided losses,
+Guangzhou did not), consistent with the mechanical ledger's own
+same-day-weather subclass (1W/2L, −7.65u) staying net-negative; the
+veto's job here is avoiding correlated losses, not winning every row.
+Full grading in RETRO-20260905-2012. Mechanical ledger's
+outside-view-veto line as of this update
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`): 107
+CF trades, 46W/61L, pnl +$77.17 ≙ +15.43u, brier_delta +0.0280, held-out
++$106.17 (was 106 trades, 46W/60L, +$82.17 ≙ +16.4u, held-out +$111.17
+before this row).
+
+**BACKFILL 2026-09-06 16:12Z (found by `strategy/tools/reconcile.py` on the
+16:12Z cycle): Munich 25°C same-day exact-temp weather row missing from
+this hand table.** Settled 2026-09-06T00:12:47Z (originally researched/vetoed
+2026-09-05 08:22Z, `bc29b9874a48`); should have been appended alongside the
+Guangzhou row above but was dropped.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Munich 25°C same-day weather (bc29b9874a48) | 0.26 / 0.23 | Yes | +0.01 | No | −1.00 |
+
+Model (0.26) leaned Yes slightly more than the market mid (0.23); the
+realizable counterfactual enters Yes at the 0.25 ask (edge +0.01,
+essentially at-market — this was never a real disagreement, just noise
+around a near-consensus number). Outcome was No, so the tiny counterfactual
+Yes-side edge lost, −1.00u. Per the 2026-09-06 ~00:30Z operator note, this
+file's hand totals are narrative only — the mechanical ledger is the
+record. Current mechanical outside-view-veto line
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`, includes
+this row): 116 settled declined forecasts, 108 fillable CF trades, 46W/62L,
+pnl +$72.17 ≙ +14.43u, brier_delta +0.0279, held-out +$106.18. No ruling
+change (edge was ~0, not a real disagreement to grade).
+
+**2026-09-07 04:14Z update (FULL cycle, cloud; resolve.py settled 2 forecasts,
+1 `outside-view-veto`).** Hong Kong 26°C same-day lowest-temp bracket
+(`2eb38db512c9`, researched 2026-09-03 21:01Z): own post-obs est P(26.x)=0.80
+vs mid 0.715 (bid 0.64/ask 0.75 at record — book had moved to ask 0.77 by
+fill), model side Yes on a station-observation-conditioned same-day read
+(HKO 04:40 HKT already at 26.7°C, needed ≥0.8°C more cooling in ~2h to
+leave the bucket) — vetoed under both self-model-class and wide-spread
+(spread 0.11). Settled Yes, so the declined Yes-side counterfactual trade
+won.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Hong Kong 26°C same-day weather (2eb38db512c9) | 0.80 / 0.715 | Yes | +0.030 | Yes | **+0.30** |
+
+Current mechanical ledger's outside-view-veto line (`core/counterfactual.py
+ledger --skip-reason outside-view-veto`, includes this row): 117 settled
+declined forecasts, 109 fillable CF trades, 47W/62L, pnl +$73.66 ≙ +14.73u,
+brier_delta +0.0273, held-out +$107.67. Ruling: no boundary change at n=1 —
+same-day weather subclass now 2W/2L in the mechanical ledger's own grouping
+(was 1W/2L before this row), consistent with the standing read that the
+veto trades a few avoidable wins for avoiding the correlated-loss tail
+elsewhere in the family; own estimate (0.80) also beat the blind mech
+second opinion (superforcaster-market-aware, 0.28) on this row, worth
+tracking if the pattern repeats. Full grading in RETRO-20260907-0414.
+
+**2026-09-07 12:38Z update (LIGHT tick, cloud; resolve.py settled 2
+forecasts, 1 `outside-view-veto`).** Wellington 10°C same-day
+highest-temp bracket (`b838efbe4ade`, researched 2026-09-07 02:20Z): own
+post-obs est P(10.0)=0.4522 (open-meteo hourly max 9.5°C, same-day
+sd=0.6) vs mid ~0.7985 (bid 0.769/ask 0.861 at record) — model's implied
+No belief (0.548) well above the market's implied No (~0.139-0.231),
+vetoed as a same-day weather self-model disagreement. Settled Yes, so
+the declined No-side counterfactual trade lost.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Wellington 10°C same-day weather (b838efbe4ade) | 0.4522 / 0.7985 | No | +0.317 | Yes | −1.00 |
+
+Net this batch: **−1.00u** (0W/1L). Current mechanical ledger's
+outside-view-veto line (`core/counterfactual.py ledger --skip-reason
+outside-view-veto`, includes this row): 118 settled declined forecasts,
+110 fillable CF trades, 47W/63L, pnl +$68.66 ≙ +13.73u, brier_delta
++0.0293, held-out +$102.67 (was 117 rows, 109 trades, 47W/62L,
++$73.66 ≙ +14.73u, brier_delta +0.0273, held-out +$107.67 before this
+row). Ruling: no boundary change at n=1 — the mechanical ledger's own
+same-day weather subclass is now 5 rows, 1W/4L, −17.65 (was 4 rows,
+1W/3L, −12.65): this row is a fourth avoided loss (Shanghai, Munich,
+Miami, and now Wellington all had their declined side lose), against
+Guangzhou as the one case where the veto missed a win. A fixed-sd
+same-day point-forecast Gaussian is still net-negative on this exact
+bracket shape (4 of 5 declined trades would have lost), consistent with
+keeping the veto rather than loosening it — this row reinforces the
+standing read, it does not reverse it. Full grading in
+RETRO-20260907-1238.
+
+**2026-09-07 16:14Z update (LIGHT tick, cloud; resolve.py settled 2
+`outside-view-veto` forecasts, siblings of the AfD/Grüne Sachsen-Anhalt
+settlements).** SPD ≥9% (`3df069438d36`): est 0.22 vs ask 0.088 at
+record, Yes-side edge ~0.13. Official SPD 9.3% → Yes — declined trade
+**WINS**, +$51.82 (+10.36u), a veto miss. Tokyo lowest-temp 22°C Sep7
+(`ff7e0fda3407`, same-day weather subclass): est P(No)=0.17 vs ask 0.10,
+No-side edge 0.07. Official low was 22°C → Yes — declined trade
+**LOSES**, −$5.00 (−1.00u), a correct decline.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| SPD ≥9% Sachsen-Anhalt (3df069438d36) | 0.22 / 0.088 | Yes | +0.132 | Yes | **+10.36** |
+| Tokyo 22°C Sep7 (ff7e0fda3407) | 0.17 / 0.10 | No | +0.070 | Yes | −1.00 |
+
+Net this batch: **+9.36u, 1W/1L** ($51.82 − $5.00 = $46.82 dollars).
+Current mechanical ledger (`core/counterfactual.py ledger --skip-reason
+outside-view-veto`, includes both rows): 120 settled declined forecasts,
+112 fillable CF trades, 48W/64L, pnl +$115.48 ≙ +23.10u, brier_delta
++0.0271, held-out +$149.49 (was 118 rows, 110 trades, 47W/63L,
++$68.66 ≙ +13.73u, brier_delta +0.0293, held-out +$102.67 before these
+two rows). Side split: yes 34 rows/34 trd/9W-25L/+$20.82; no 86
+rows/78 trd/39W-39L/+$94.66. Ruling: no boundary change at n=1 on
+either row — the SPD miss is a real cost but sits inside the standing
+read that yes-side vetoes are the worse-performing class (9W/25L at
+~26% win rate vs no-side's 39W/39L at 50%); occasional large yes-side
+misses like this one are the expected cost of holding that boundary, not
+new evidence to loosen it. The Tokyo row extends the same-day-weather
+subclass's run of correct declines. Full grading in
+RETRO-20260907-1614.
+
+[MERGE NOTE, operator reconcile 2026-09-07 ~21:00Z: the operator-machine
+loop graded the same three rows (Wellington, SPD >=9%, Tokyo) in parallel
+between 12:41Z and 20:08Z and its push was rejected; origin's table rows
+above are canonical and its duplicate rows are not carried. Two distinct
+rulings from the operator-machine retros (RETRO-20260907-1241, -1613) are
+carried here as pre-registered, not enacted: (a) Wellington -- the mean was
+right and the dispersion wrong; a same-day point forecast sitting ON a
+bucket boundary makes P(bucket) ~0.45 by construction, and the market's
+0.815 (implied sd ~0.35 after noon) read the afternoon peak better; test
+the after-noon sd (0.6 vs ~0.35) once the same-day subclass reaches ~6
+settled rows. (b) SPD >=9% and the Gruene >=7% bet WON are one event: the
+self-chosen sd (1.2-1.3) for sub-10% parties in this Landtag election was
+too tight and the miss was upward; at the next German state election,
+grade the small-party vote-share Gaussian rows against a wider,
+upward-skewed error before the category is allowed a >0.10 disagreement.]
+
+**2026-09-07 22:14Z update (FULL cycle, cloud; resolve.py settled 1
+`outside-view-veto` forecast).** Jeddah 38°C same-day highest-temp bracket
+(`39dbfcb80a90`, researched 2026-09-07 02:20Z): open-meteo daily forecast
+max 35.0°C (Asia/Riyadh, pre-dawn ~05:15 local, next-day-style sd=1.2 per
+playbook), own est P(38°C)=0.0168 vs mid 0.165 (bid 0.14/ask 0.19 at
+record) — model's implied No belief (0.983) well above the market's
+implied No (~0.81-0.86), vetoed as a weather self-model disagreement.
+Settled No, so the declined No-side counterfactual trade won.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Jeddah 38°C same-day weather (39dbfcb80a90) | 0.0168 / 0.165 | No | +0.148 | No | **+0.23** |
+
+Current mechanical ledger's outside-view-veto line
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`,
+includes this row): 121 settled declined forecasts, 113 fillable CF
+trades, 49W/64L, pnl +$116.29, brier_delta +0.0267, held-out +$146.68.
+Ruling: no boundary change at n=1 — this row is well outside the
+same-day-weather subclass's usual afternoon-peak-boundary failure shape
+(a pre-dawn forecast on a wide 3°C-out bucket, not a near-boundary same-day
+read), and it is a clean win for the self-model, consistent with the
+veto correctly avoiding the tail loss elsewhere in the weather category
+(still net −$48.60 in the mechanical ledger) rather than evidence to
+loosen it.
+
+**2026-09-08 deep retro (resolve.py this pass settled 1
+`outside-view-veto` forecast).** Toronto 25°C same-day highest-temp
+(`291e9630e91e`, recorded 2026-09-07 00:23Z, next-day-style): open-meteo
+point forecast max 25.4°C, N(25.4, 1.2) gives P(25°C)=0.307 vs market
+0.57, disagreement 0.26, vetoed under the weather-category moratorium.
+Official high was 25°C → Yes. The declined No-side CF trade (No @0.44,
+claimed edge 0.253) **LOSES** −$5.00 (−1.00u): a correct decline, and a
+clean self-model miss — the point forecast was right (25.4 rounds into
+the bucket) and the sd=1.2 dispersion pushed 0.69 of the mass out of a
+bucket the market read at 0.57.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Toronto 25°C Sep7 (291e9630e91e) | 0.307 / 0.57 | No | +0.253 | Yes | −5.00 |
+
+Current mechanical ledger's outside-view-veto line
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`, after
+`screen_replay.py events --limit 200`, includes this row): 122 settled
+declined forecasts, 114 fillable CF trades, 49W/65L, pnl +$111.29,
+brier_delta +0.0289, held-out +$141.68. Ruling: no boundary change —
+this is the second "mean right, dispersion wrong" weather row (after
+Wellington, RETRO-20260907-1241's pre-registered sd question): the
+Gaussian's sd, not its center, produced the disagreement, and the market
+priced the same point forecast with a tighter sd and won. It counts
+toward the pre-registered Wellington sd test (re-examine the weather sd
+once the same-day subclass reaches ~6 settled rows — this row is
+next-day-style, so it informs but does not trigger that test). Within
+the veto slice, weather now reads 18 rows, 5W/13L, CF −$53.60, dBrier
++0.0836: the veto's single best category.
+
+**2026-09-09 update (12:3xZ resolve.py, LIGHT tick, cloud; three
+`econ-cpi` veto forecasts settled on the China Aug 2026 CPI print — one
+`outside-view-veto`, one `wide-spread-veto` fillable, one
+`wide-spread-veto` refused as unexecutable).** NBS printed China Aug 2026
+CPI YoY at 0.8%, in the 0.7-0.8% bracket. The base-effect anchor used at
+record time (Jul YoY 0.5% + Aug seasonal MoM ~+0.3% → ~0.8%) was exact —
+first confirmed application of the PPI base-effect projection method
+(§"PPI YoY brackets: base-effect projection", 2026-08-11 above) to a
+second economic series. Two consensus sources disagreed by one bracket at
+record time (tradingeconomics 0.7% vs investing.com/Lundgreen 0.9%); TE's
+figure fell in the actual bracket, Lundgreen/investing.com's did not —
+n=1, too weak to rule on for future disputes, but the first data point
+favors TE when the two conflict.
+
+- **0.7-0.8% bracket** (`19cf14c87979`, outside-view-veto): mixture model
+  P=0.33 vs mid 0.485; the No-side apparent edge (~0.15) was built on the
+  contradictory consensus and vetoed under gate 2. Settled Yes — the
+  declined No bet would have LOST. Correct veto.
+- **≥0.9% bracket** (`7bacc91ddf91`, wide-spread-veto): own P=0.38 vs ask
+  0.305, spread 0.069 > max_spread 0.06. Settled No — the declined Yes
+  bet would have LOST. Correct veto.
+- **0.5-0.6% bracket, post-print supersede** (`9eff80f25296`,
+  wide-spread-veto): after the print, Yes ask 0.22 was mispriced (true
+  edge ~0.20 on No) but the No side had zero asks in the live book (bids
+  only) — refused by the fill model as unexecutable, correctly excluded
+  from the counterfactual trade count, not a real declined trade.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| China CPI 0.7-0.8% Aug26 (19cf14c87979) | 0.67 / 0.53 | No | +0.140 | Yes | −1.00 |
+| China CPI ≥0.9% Aug26 (7bacc91ddf91) | 0.38 / 0.331 | Yes | +0.049 | No | −1.00 |
+
+Net this batch: **−2.00u** (0W/2L). Current mechanical ledgers
+(`core/counterfactual.py ledger --skip-reason <reason>`, both include
+these rows):
+- outside-view-veto: 123 settled declined forecasts, 115 fillable CF
+  trades, 49W/66L, pnl +$106.29 ≙ +21.26u, brier_delta +0.0301, held-out
+  +$136.68 (was 122/114/49W-65L/+$111.29/+$141.68 before this row). Side
+  split: yes 34 rows/34 trd/9W-25L/+$20.82 (unchanged this batch); no 89
+  rows/81 trd/40W-41L/+$85.47 (adds this row's 0W/1L, −$5.00). Check:
+  20.82+85.47=106.29 ✓.
+- wide-spread-veto: 6 settled declined forecasts, 4 fillable CF trades,
+  2 refused, 2W/2L, pnl −$7.82 ≙ −1.56u, brier_delta −0.0326, held-out
+  −$8.51 (was 4/3/1 refused/2W-1L/−$2.82/−$2.83 before this batch). Side
+  split: yes 3 rows/3 trd/2W-1L/−$2.82 (unchanged this batch); no 3
+  rows/1 trd/0W-1L/−$5.00 (adds this row's 0W/1L, −$5.00, plus the
+  refused `9eff80f25296` which contributes a settled row but no trade).
+  Check: −2.82−5.00=−7.82 ✓.
+
+Ruling: no boundary change at n=2 on either gate — both counterfactual
+trades would have lost, i.e. both declines were correct, consistent with
+the standing reads (outside-view-veto's no-side already the stronger
+performer at 40W/41L vs yes-side's 9W/25L; wide-spread-veto still thin at
+n=6, too small to read). The base-effect method confirmation and the
+TE-vs-Lundgreen data point are the more useful findings from this batch
+than the veto grading — both are single-instance and carried as
+hypotheses, not rules, until a second China CPI print or a second
+TE/Lundgreen conflict tests them.
+
+**2026-09-11 update (08:1xZ resolve.py, LIGHT tick, cloud; RETRO-20260911-0814;
+3 more `wide-spread-veto` rows settled — one this tick, two backlog
+catch-ups found while reconciling the tool's live total against this
+table's last snapshot, both missed by earlier ticks):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Chewy "Consumable" wide-spread duplicate (`e7a452fef1be`) | 0.93 / 0.59 | Yes | +0.340 | Yes | **+3.47** |
+| RNC "2028/Campaign" (`906a1a65abc8`) | 0.80 / 0.71 | Yes | +0.090 | Yes | **+2.04** |
+| RNC "Tax on Tips/Overtime" (`83321f868e0f`) | 0.75 / 0.77 | Yes | −0.020 | Yes | **+1.49** |
+
+`e7a452fef1be` settled 2026-09-09T14:23:30Z but was never entered here:
+it's the original 0.93-est Chewy forecast, superseded two minutes after
+recording by `ffc3fcdcbaa6` when the label was corrected to
+`outside-view-veto` (that row is already graded above at line ~3444).
+`core/counterfactual.py` deliberately keeps superseded rows rather than
+dropping them, so this is a legitimate second row under
+`wide-spread-veto`, distinct from its already-graded successor — just
+never manually added. `906a1a65abc8` settled 2026-09-11T07:23:43Z but
+the 07:28:35Z TRIGGERED cycle that should have graded it (settlement
+duty applies to TRIGGERED cycles same as any other, per
+RETRO-20260908-2250) only logged its Sweden Liberals research and
+reported "settled 0" — a miss, caught up here one tick late.
+`83321f868e0f` is this tick's own genuine new settlement.
+
+Current mechanical ledger's wide-spread-veto line (`core/counterfactual.py
+ledger --skip-reason wide-spread-veto`): 9 settled declined forecasts, 7
+fillable CF trades, 2 refused, 5W/2L, pnl −$0.81, brier_delta −0.0967,
+held-out −$1.50 (was 6/4/2 refused/2W-2L/−$7.82/−0.0326/−$8.51 before
+this batch). Side split: yes 6 rows/6 trd/5W-1L/+$4.19 (adds all three
+new wins, +$7.00, was 3/3/2W-1L/−$2.82 before this batch); no 3 rows/1
+trd/0W-1L/−$5.00 (unchanged this batch). Check: 4.19−5.00=−0.81 ✓;
+−2.82+3.47+2.04+1.49=4.18≈4.19 (rounding) ✓.
+
+Ruling: no boundary change at n=9/7 trades — all three new rows are
+declined-Yes-side wins, extending the yes-side's edge but still far
+short of the ~15-settlement floor. `vance-mention` as a category: n=2,
+both won, +$3.54 — both are broad, near-default politician phrases
+("campaign", Vance's own stock "tax on tips/overtime" line) rather than
+narrow session-specific content, consistent with the broad-phrase side
+of the say-the-word split RETRO-20260911-0624 already documented; adds
+weak supporting evidence, not a new finding.
+
+**2026-09-15 12:5xZ update (LIGHT tick, operator machine, resolve.py; 1
+`wide-spread-veto` forecast settled, plus a catch-up row).** `705c1219decd`
+is this tick's genuine settlement: F1 Italian GP safety car (raced Sep6,
+market end date Sep13), a fact-final row where the F1.com race report
+confirmed a physical Safety Car on lap 2. Declined because the spread
+(0.099) exceeded max_spread 0.06. `697a7f4f3799` (Emmys, Last Week
+Tonight) settled 2026-09-15T04:13Z and was graded narratively in
+RETRO-20260915-0414, but that commit did not extend this table - a
+violation of the 2026-08-23 same-commit rule, repaired here.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Emmys Variety Series, Last Week Tonight (`697a7f4f3799`) | 0.19 / 0.14 | Yes | +0.050 | No | **−5.00** |
+| F1 Italian GP safety car, fact-final (`705c1219decd`) | 0.99 / 0.899 | Yes | +0.091 | Yes | **+0.56** |
+
+Current mechanical ledger's wide-spread-veto line (`core/counterfactual.py
+ledger --skip-reason wide-spread-veto`): 11 settled declined forecasts, 9
+fillable CF trades, 2 refused, 6W/3L, pnl −$5.25, brier_delta −0.0788,
+held-out −$0.93 (was 9/7/2 refused/5W-2L/−$0.81/−0.0967/−$1.50). Side
+split: yes 8 rows/8 trd/6W-2L/−$0.25 (adds −$5.00 and +$0.56, was
+6/6/5W-1L/+$4.19); no 3 rows/1 trd/0W-1L/−$5.00 (unchanged). Check:
+−0.25−5.00=−5.25 ✓; 4.19−5.00+0.56=−0.25 ✓.
+
+Ruling: no boundary change at n=11/9 trades. The fact-finality subclass
+is now 4 trades, 3W/1L, +$0.65: the veto costs little on fact-final rows
+because a 0.90 ask leaves only ~$0.56 to win on a $5 stake, so a tight
+spread gate there forgoes small, near-certain gains rather than large
+ones. The −$5.00 Emmys row is a thin-edge (+0.05) judgment row the veto
+correctly kept out.
+
+**2026-09-16 06:2xZ update (LIGHT tick, cloud, resolve.py; 1
+`wide-spread-veto` forecast settled — the third sibling in this week's
+Israel x Lebanon "diplomatic meeting by <date>" family, see
+RETRO-20260916-0621).** `7d43ec49805b` (Israel x Lebanon by-Sep15,
+supersedes `cea6c0cc22f9`): own 0.75 vs Yes ask 0.90 (No ask 0.19,
+implied No-side edge 0.06), declined because spread 0.09 exceeded
+max_spread 0.06. Settled **Yes** — the declined No-side counterfactual
+trade **loses**.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Israel x Lebanon by-Sep15 (`7d43ec49805b`) | 0.75 / 0.855 | No | +0.060 | Yes | **−5.00** |
+
+Current mechanical ledger's wide-spread-veto line (`core/counterfactual.py
+ledger --skip-reason wide-spread-veto`): 12 settled declined forecasts,
+10 fillable CF trades, 2 refused, 6W/4L, pnl −$10.25, brier_delta
+−0.0688, held-out −$5.93 (was 11/9/2 refused/6W-3L/−$5.25/−0.0788/
+−$0.93). Side split: yes 8 rows/8 trd/6W-2L/−$0.25 (unchanged); no 4
+rows/2 trd/0W-2L/−$10.00 (adds this loss, was 3/1/0W-1L/−$5.00). Check:
+−0.25−10.00=−10.25 ✓.
+
+Ruling: no boundary change at n=12/10 trades. This is the same shape as
+the two outside-view-veto siblings settled the same tick (own estimate
+below market on a multi-channel diplomatic-contact process, market
+right); see the outside-view-veto section below for the cross-family
+read.
+
+**2026-09-09 update (14:2xZ resolve.py, FULL cycle, cloud; 1
+`outside-view-veto` forecast settled — the Chewy "Consumable" say-the-word
+row flagged in schedule.json for settlement grading).** `ffc3fcdcbaa6`
+(recorded 2026-09-08 20:21Z, superseding `e7a452fef1be` two minutes
+earlier as a label erratum — same 0.93 estimate, reclassified from
+`wide-spread-veto` because DEEP-2026-08-14's tiebreak routes a
+>0.10-claimed-edge row to outside-view-veto even when the spread gate
+also fires): Chewy fiscal Q2 2026 earnings call, own est 0.93 vs ask
+0.58 (mid 0.34, an empty-book artifact — bid was 0.10), on the evidence
+that "Consumables" is Chewy's own reported revenue segment name, used
+5-6 times in the prior-year Q2 transcript. Settled **Yes** — the
+declined Yes-side counterfactual trade **wins**. Grading the three
+questions the watch item pre-registered: (a) the tool's own subclass
+tagger filed this row under `fact-finality`, not unlabelled judgment —
+independent, mechanical support for treating "company repeats its own
+standard reported vocabulary" as closer to a mechanical base rate than
+a behavioural self-model, though n=1 is too thin to act on; (b) the
+blind mech (`superforcaster-market-aware`, service 44) gave 0.92 —
+within 0.01 of the own estimate — while self-classing the question
+`NR-utterance`/`researchability=0.15`, i.e. confidently right on a
+question it flagged as unresearchable, the same pattern the still-open
+Vance utterance rows show; (c) the 40-share ask at 0.58 was in fact
+takeable at the strategy's $5 (~8.6-share) stake size, so the
+wide-spread veto alone would have been overcautious here — the correct
+blocker was the outside-view veto's >0.10 boundary, which this row does
+not argue against. Full narrative in RETRO-20260909-1425.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Chewy "Consumable" say-the-word (ffc3fcdcbaa6) | 0.93 / 0.58 | Yes | +0.350 | Yes | **+3.62** |
+
+Current mechanical ledger's outside-view-veto line
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`, after
+`screen_replay.py events --limit 200`, includes this row): 124 settled
+declined forecasts, 116 fillable CF trades, 82 events, 50W/66L, pnl
++$109.91, brier_delta +0.0264, held-out +$140.30 (was 123/115/49W-66L/
++$106.29/+0.0301/+$136.68 before this row). Side split: yes 35 rows/35
+trd/10W-25L/+$24.44 (adds this row's win, +$3.62, was 34/34/9W-25L/
++$20.82); no 89 rows/81 trd/40W-41L/+$85.47 (unchanged this batch).
+Check: 24.44+85.47=109.91 ✓.
+
+DEEP-2026-09-11 batch (settled by the deep retro's own resolve run,
+graded DEEP-2026-09-11 (c), table extended same-commit per the
+2026-08-23 rule). Both are fact-finality utterance rows (standard rally
+vocabulary, multi-hour speech window) declined at claimed edges
+0.21/0.18 under the >0.10 veto:
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| RNC "Radical Left" trump-mention (36ff9feec021) | 0.87 / 0.66 | Yes | +0.210 | Yes | **+2.58** |
+| RNC "MAGA/MAGA-full" say-the-word (87736f3e8ab9) | 0.90 / 0.72 | Yes | +0.180 | Yes | **+1.94** |
+
+Mechanical ledger after this batch: 126 settled declined forecasts,
+118 fillable CF trades, 84 events, 52W/66L, pnl +$114.43, brier_delta
++0.0246, held-out +$143.25. Side split: yes 37 rows/37 trd/12W-25L/
++$28.96 (adds both wins, +$2.58 and +$1.94, was 35/35/10W-25L/+$24.44);
+no 89 rows/81 trd/40W-41L/+$85.47 (unchanged this batch).
+Check: 28.96+85.47=114.43 ✓. The subclass reading stays uncomfortable
+in the honest direction: fact-finality is now n=29 labeled rows at CF
+pnl +$122.08 but subclass dBrier +0.0419 — the wins are real money and
+still worse-than-market beliefs on average; the fork bar below, not
+this table, decides anything.
+
+Ruling: no boundary change at n=1 within say-the-word (the category
+verdict threshold is ~15 settlements) and no change to the relaxation
+fork's status — overall brier_delta is still positive (+0.0264, agent
+behind market) and this single win doesn't reach the fork's per-fold
+recompute threshold on its own. The useful finding is the (a)/(b)/(c)
+grading above, carried as a baseline for the still-open Vance utterance
+rows (`83321f868e0f`, `906a1a65abc8`) rather than a rule change yet.
+
+**2026-09-11 06:24Z update (LIGHT tick, cloud, resolve.py; 2 more of the
+same RNC Sep10 utterance family settled — both fact-finality, both
+`Yes`-side, both declined at a wide claimed edge):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| RNC "Endorse/Endorsed/Endorsement" say-the-word (16e13abfec2f) | 0.58 / 0.43 | Yes | +0.150 | No | **−5.00** |
+| RNC "America First" say-the-word (11ea1286d8c7) | 0.62 / 0.28 | Yes | +0.340 | No | **−5.00** |
+
+Mechanical ledger after this batch (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`): 128 settled declined forecasts, 120
+fillable CF trades, 86 events, 52W/68L, pnl +$104.43, brier_delta
++0.0279, held-out +$133.25 (was 126/118/84/52W-66L/+$114.43/+0.0246/
++$143.25 before this batch). Side split: yes 39 rows/39 trd/12W-27L/
++$18.96 (adds both losses, −$5.00 each, was 37/37/12W-25L/+$28.96); no
+89 rows/81 trd/40W-41L/+$85.47 (unchanged this batch). Check:
+18.96+85.47=104.43 ✓.
+
+Ruling: both declines correct — the counterfactual Yes trades both lose,
+so the >0.10 veto again saved money on this event family (now 2 wins /
+2 losses for the same-event Sep10 RNC utterance batch: MAGA and Radical
+Left won, Endorse and America First lost). The same-session bet
+(`e77eef5d06ad`, "Afford", edge 0.06, under the veto) also lost this
+tick — see RETRO-20260911-0624 for the full family read. No boundary
+change (fork status is deep-retro-only per the section below); this is
+a table extension only.
+
+**DEEP-2026-09-12 catch-up batch (settled 2026-09-11 with the Aug CPI
+cluster; the 16:17Z settlement commit e081582 graded the cluster
+narratively in its gate-2 note but did NOT extend this table in the
+same commit — a violation of the 2026-08-23 same-commit rule on its
+face, recorded in DEEP-2026-09-12 (d) and repaired here.** Both rows
+are Aug-CPI bracket legs recorded on the No token (question frame
+below follows the tool: both count as No-side), declined under the
+>0.10 veto on an unsourced-sd Gaussian (gate 2):
+
+| Row | est vs mkt (No token) | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Aug headline MoM 0.4% bracket, No leg (5a6d5321c25a) | 0.66 / 0.515 | No | +0.140 | print was 0.4% (No leg lost) | **−5.00** |
+| Aug core MoM 0.2% bracket, No leg (79e72c3002c3) | 0.62 / 0.45 | No | +0.160 | print was 0.3% (No leg won) | **+5.87** |
+
+Mechanical ledger after this batch (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`): 130 settled declined forecasts, 122
+fillable CF trades, 88 events, 53W/69L, pnl +$105.30, brier_delta
++0.0276, held-out +$134.12 (was 128/120/86/52W-68L/+$104.43/+0.0279/
++$133.25 before this batch). Side split: yes 39 rows/39 trd/12W-27L/
++$18.96 (unchanged this batch); no 91 rows/83 trd/41W-42L/+$86.34
+(adds −$5.00 and +$5.87, was 89/81/40W-41L/+$85.47).
+Check: 18.96+86.34=105.30 ✓. Ruling: net +$0.87 on the pair, and the
+winning leg is the one whose edge came from a legible mean-shift off
+the sourced nowcast, while the losing leg's edge rested on the
+unsourced sd — the same split RETRO-20260911-1615's gate-2 note found
+across the whole cluster. Supports gate 2 as written; no boundary
+change.
+
+**2026-09-16 06:2xZ update (LIGHT tick, cloud, resolve.py; 2 rows from
+the Israel x Lebanon "diplomatic meeting by <date>" family settled, both
+No-side timeline declines — see RETRO-20260916-0621 for the full family
+read across all 5 settled siblings):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Israel x Lebanon by-Sep18 (9894fc8df165) | 0.55 / 0.835 | No | +0.260 | Yes | **−5.00** |
+| Israel x Lebanon by-Sep16 (459635ab318c) | 0.62 / 0.935 | No | +0.281 | Yes | **−5.00** |
+
+Mechanical ledger after this batch (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`): 132 settled declined forecasts, 124
+fillable CF trades, 90 events, 53W/71L, pnl +$95.30, brier_delta
++0.0296, held-out +$123.84 (was 130/122/88/53W-69L/+$105.30/+0.0276/
++$134.12 before this batch). Side split: yes 52 rows/52 trd/16W-36L/
+−$13.56 (unchanged this batch); no 72 rows/72 trd/37W-35L/+$108.86
+(adds both −$5.00 losses, was 70/70/37W-33L/+$118.86). Check:
+−13.56+108.86=95.30 ✓.
+
+Ruling: both declines correct in isolation (the market beat the
+discounted timeline estimate both times), but this is the third sibling
+in the same underlying process to do so this week (the third,
+`7d43ec49805b`, is a wide-spread-veto row extended in that section
+below) — worth a deep retro look at whether "multiple parallel qualifying
+channels" markets deserve a higher outside-view floor, but n=3 from one
+process is far short of the relaxation fork's 40-event bar and that fork
+is deep-retro-only. No boundary change today.
+
+**2026-09-16 22:11Z update (FULL cycle, operator machine; resolve.py
+settled 7 declined-side rows this window — the Sept15 box-office bracket
+and the full Warsh Sep16 FOMC-presser word-count batch, 5 outside-view-veto
++ 1 wide-spread-veto):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Spider-Man overtake Star Wars by Sep15 (6eb52610fb5c) | 0.68 / 0.885 | No | +0.170 | Yes | **−5.00** |
+| Warsh "Anchor"/"Anchored" (fd03d4763d62) | 0.20 / 0.325 | No | +0.120 | Yes | **−5.00** |
+| Warsh "Inflation" 40+ (340afae4c4b8) | 0.08 / 0.215 | No | +0.130 | No | **+1.33** |
+| Warsh "Echo" (5ed39e44acd1) | 0.75 / 0.475 | Yes | +0.270 | No | **−5.00** |
+| Warsh "Scenario" (03962bee9d8d) | 0.30 / 0.465 | No | +0.150 | No | **+4.09** |
+| Warsh "Luck"/"Lucky" (e94a328d4e7f) | 0.20 / 0.37 | No | +0.150 | No | **+2.69** |
+| Warsh "Labor Force" (0dd29ac81ce4, wide-spread-veto) | 0.30 / 0.47 | No | +0.140 | No | **+3.93** |
+
+Net this batch: outside-view-veto **−1.94u** (2W/4L: Anchor/Echo/Spider-Man
+lost, Inflation-40+/Scenario/Luck won); wide-spread-veto **+3.93u** (1W/0L,
+Labor Force). Ruling: the Warsh press-conference batch splits almost
+evenly (3W/3L on the outside-view-veto legs) rather than confirming or
+refuting the veto boundary at this n — same "confident middle, thin
+tails" shape noted elsewhere in this ledger for point-estimate Gaussians
+on a single transcript. Mechanical ledger is the record going forward
+(`core/counterfactual.py ledger --skip-reason outside-view-veto` /
+`--skip-reason wide-spread-veto`); this table entry satisfies the
+per-row documentation duty (reconcile.py check 5) without re-deriving
+the running hand totals, per the 2026-09-06 operator note above that
+this file's totals are narrative only.
+
+**2026-09-17 02:53Z update (TRIGGERED cycle; resolve.py settled 2
+declined-side rows from the Trump Gastonia NC rally say-the-word
+family — see RETRO-20260917-0253):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| MAHA (0c64397063d4, outside-view-veto) | 0.48 / 0.63 | No | +0.130 | Yes | **−5.00** |
+| Egg (56c24f26e025, wide-spread-veto) | 0.45 / 0.735 | No | +0.050 | Yes | **−5.00** |
+
+Both declines correct: same rally, both self-modeled from thin
+(1-2-transcript) base rates on topic-contingent phrases, both resolved
+Yes against the model's No lean — the veto avoided both losses. Mechanical
+ledger after this batch (`core/counterfactual.py ledger --skip-reason
+outside-view-veto` / `--skip-reason wide-spread-veto`): outside-view-veto
+139 rows/131 trd/56W-75L/+$83.41/dBrier +0.0315/held-out +$89.19;
+wide-spread-veto 14 rows/12 trd/7W-5L/−$11.32/dBrier −0.0517/held-out
+−$7.00. This entry satisfies the per-row documentation duty without
+re-deriving the running hand totals, per the 2026-09-06 operator note.
+No boundary change at this n — two more same-family confirmations, not a
+new failure mode.
+
+**2026-09-17 deep-retro REPAIR (DEEP-2026-09-17): one veto settlement
+missed its same-commit table entry.** `3a539d9be02d` (Trump NC rally
+"Furniture", wide-spread-veto, live ask 0.74/bid 0.40 at record) settled
+on the 2026-09-17 04:1xZ LIGHT tick and RETRO-20260917-0413 graded it
+narratively, but the same commit (9acd1e8) did not extend this table —
+the exact violation shape the schedule.json `_comment` rule (DEEP-2026-08-23,
+re-affirmed DEEP-2026-09-02) names as "a violation on its face". Row,
+booked here one deep-retro late:
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Trump NC "Furniture" (3a539d9be02d, wide-spread-veto) | 0.15 / 0.57 | No | +0.250 | No | **+3.33** |
+
+Mechanical ledger after this row (`core/counterfactual.py ledger
+--skip-reason wide-spread-veto`, verified this retro): 15 rows/13 trd/
+8W-5L/−$7.99/dBrier −0.0684/held-out −$3.67; side split yes 8/8/6W-2L/
+−$0.25, no 7/5/2W-3L/−$7.74. The miss is an isolated recurrence (last
+instance RETRO-20260822-1314), likely because the settling retro was
+absorbed in the utterance-checkpoint correction; the rule stands as
+written and needs no sharpening — it was not followed, not unclear.
+
+**2026-09-17 14:15Z REPAIR + update (LIGHT tick, cloud; resolve.py settled
+1 new outside-view-veto forecast — BoE 25bp hike, `bc482ffb3606`, the
+pre-registered discretionary-vote-veto test — and reconciling found 3
+more from the 06:13:08Z Sweden Liberals settlement batch that never got a
+table row; see RETRO-20260917-1415 for the full read):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Sweden Liberals re-forecast 1 (07a026bde227) | 0.23 / 0.49 | No | +0.260 | Yes | **−5.00** |
+| Sweden Liberals re-forecast 2 (fb5dc4ef2365) | 0.12 / 0.47 | No | +0.350 | Yes | **−5.00** |
+| Sweden Liberals re-forecast 3 (42edbef0f086) | 0.27 / 0.049 | No | +0.221 | Yes | **−5.00** |
+| BoE 25bp hike (bc482ffb3606) | 0.20 / 0.061 | Yes | +0.139 | No | **−5.00** |
+
+Mechanical ledger after this batch (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`): 143 settled declined forecasts, 135
+fillable CF trades, 99 events, 56W/79L, pnl +$63.41, brier_delta +0.0370,
+held-out +$67.42 (was 139/131/56W-75L/+$83.41/+0.0315/+$89.19 before this
+batch). Ruling: no boundary change — three of the four rows are re-reads
+of the same already-graded Sweden Liberals event (consistent with its
+settled bet `b063db346052`, all No-side declines lost together), and the
+BoE row is a clean confirmation that a discretionary MPC vote reads like
+the self-model veto class, not a special case: the market (and the
+Reuters poll it tracked) beat both the own estimate and the weaker LSEG/
+SONIA secondary-sourced benchmarks that motivated the claimed edge. This
+entry satisfies the per-row documentation duty without re-deriving the
+running hand totals, per the 2026-09-06 operator note above.
+
+**2026-09-18 14:10Z update (LIGHT tick, operator machine; resolve.py
+settled 1 outside-view-veto forecast; full read in RETRO-20260918-1410):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| BTC touch-$80k Sep14-20 (61bc26d805b6) | 0.84 / 0.79 | Yes | +0.040 | Yes | **+1.25** |
+
+Mechanical ledger after this row (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`): 144 settled declined forecasts, 136
+fillable CF trades, 100 events, 57W/79L, pnl +$64.66, brier_delta +0.0367,
+held-out +$68.67 (was 143/135/56W-79L/+$63.41/+0.0370/+$67.42). Ruling:
+no boundary change - a 0.04 edge was never a veto-sized disagreement, and
+the row is on this ledger only because of its label (same treatment as
+`9618a7d0872d`). The label and the input both broke the touch-family
+ruling above (DEEP-2026-09-01): touch rows are `unvalidated-method`, and
+4 of the 6 modeled crypto touch rows recorded since that ruling
+(`dde658c37455`, `61bc26d805b6`, `a28637cb4026`, `8d1eb46b7c32`) used a
+guessed or swept vol. From this commit every touch estimate comes from
+`strategy/tools/touch.py`, which refuses to run without a named, dated
+`--vol-source`; the forecast note quotes its output. Settled measured-vol
+rows stand at 3 of the 6 the re-grade needs (`edd6af85d6a6`,
+`753366c2ea8e`, `fde4324641b4`), with `854536ded8be` open.
+
+**2026-09-21 06:33Z update (FULL cycle, operator machine, local copy of a
+diverged main; resolve.py settled 2 outside-view-veto forecasts from the
+Sep 20 German election night; full read in RETRO-20260921-0633):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| MV AfD most seats (506bc4c8087e) | 0.90 / 0.77 | Yes | +0.120 | Yes | **+0.28** |
+| Berlin CDU most seats (86267581486d) | 0.40 / 0.215 | Yes | +0.180 | No | −1.00 |
+
+Net this batch: **−0.72u** (1W/1L). Mechanical ledger after these rows:
+146 settled declined forecasts, 138 fillable CF trades, 102 events,
+58W/80L, pnl +$61.07, brier_delta +0.0366, held-out +$70.09 (was
+144/136/57W-79L/+$64.66/+0.0367/+$68.67; −$3.59 = +$1.41 − $5.00 ✓).
+Ruling: no boundary change. Both rows are poll-Gaussian election
+self-models; the one that won had the price OUTSIDE its whole sd-sweep
+range (0.80-0.96 vs ask 0.77), the one that lost was a precedent-shaded
+point estimate. Fork gate arithmetic stays with the deep retro.
+
+**2026-09-21 update (DEEP-2026-09-21; settled by the deep retro's own
+resolve.py run, graded same-commit per the DEEP-2026-08-23 rule; full
+read in DEEP-2026-09-21 (c)):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| AfD most seats MV (506bc4c8087e) | 0.90 / 0.77 | Yes | +0.120 | Yes | **+0.28** |
+
+Mechanical ledger after this row (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`, after `screen_replay.py events --limit
+200`): 145 settled declined forecasts, 137 fillable CF trades, 101
+events, 58W/79L, pnl +$66.07, brier_delta +0.0361, held-out +$70.08
+(was 144/136/100/57W-79L/+$64.66/+0.0367/+$68.67). Ruling: no boundary
+change — the model's inside view was right on this row (dB −0.0429,
+market drifted toward it pre-election), but the pre-registered
+relaxation fork, recomputed the same commit with this row included
+(Status 2026-09-21 below), fails BOTH numeric gates for the first time;
+one correct election call does not reopen a fork the newest fold is
+failing on money and calibration at once.
+
+**2026-09-21 update (RETRO-20260921-0625; settled by this cycle's
+resolve.py run, graded same-commit per the DEEP-2026-08-23 rule):**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| CDU most seats Berlin (86267581486d) | 0.40 / 0.215 | Yes | +0.180 | No | −5.00 |
+
+Mechanical ledger after this row (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`): 146 settled declined forecasts, 138
+fillable CF trades, 102 events, 58W/80L, pnl +$61.07, brier_delta
++0.0366, held-out +$70.09 (was 145/137/101/58W-79L/+$66.07/+0.0361/
++$70.08). Ruling: no boundary change — CDU did not win the Berlin
+election (Linke did, per the sibling Linke-Yes forecast lineage settled
+the same cycle), so the veto correctly avoided another loss; one more
+Yes-side loss added to the same behavioral-Gaussian-plurality class this
+ledger already grades as its weakest.
+
+**2026-09-21 17:3xZ update (RETRO-20260921-1730; FULL cycle, operator
+machine; resolve.py settled 4 forecasts, 2 `outside-view-veto`, graded
+same-commit per the DEEP-2026-08-23 rule).** Berlin SPD under 10% of
+second votes, two snapshots of one market (`3748352`), both on the No
+side, official SPD share 12.1% -> No, both declined trades WIN:
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Berlin SPD <10% (d0396e9b0cdd, Sep 12) | 0.20 / 0.40 | No | +0.161 | No | **+2.82** |
+| Berlin SPD <10% (62f72f65c634, Sep 14) | 0.28 / 0.5675 | No | +0.274 | No | **+6.21** |
+
+Mechanical ledger after these rows (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`): 148 settled declined forecasts, 140
+fillable CF trades, 103 events, 60W/80L, pnl +$70.11, brier_delta
++0.0337, held-out +$79.12 (was 146/138/102/58W-80L/+$61.07/+0.0366/
++$70.09). One event, so one draw. Ruling: no boundary change. The veto
+reason was honest (the No edge flipped sign between a full-poll mean and
+a newest-poll-only mean), and the input-sensitivity rule above would
+decline it again today. What the row adds: the market moved from 0.40 to
+0.57 to 0.22 on no new poll, so a price swing on a thin state-election
+bracket is not information about the centre.
+
+**2026-09-21 22:1xZ update (RETRO-20260921-2215; LIGHT tick, cloud;
+resolve.py settled 4 forecasts, 2 `outside-view-veto`, graded same-commit
+per the DEEP-2026-08-23 rule).** MV SPD second-vote brackets, election
+Sep20, official SPD share landed inside the >=31% bracket (own poll-mean
+model correct on direction both times, wrong on the veto's implied side
+once):
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| MV SPD >=31% (e056578ff5cf, Sep 14) | 0.81 / 0.86 | No | +0.040 | Yes | −5.00 |
+| MV SPD 28-31% (52c0faf90ae2, Sep 14) | 0.24 / 0.095 | Yes | +0.140 | No | −5.00 |
+
+Mechanical ledger after these rows (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`, after a fresh `screen_replay.py events`
+sweep): 150 settled declined forecasts, 142 fillable CF trades, 100
+events, 60W/82L, pnl +$60.11, brier_delta +0.0337, held-out +$69.12 (was
+148/140/103/60W-80L/+$70.11/+0.0337/+$79.12 before this pair; the evts
+drop from 103 to 100 is `screen_replay.py` re-clustering existing
+mappings, not new data). Side split: no 105 rows/97 trades/46W-51L/
++$58.49; yes 45 rows/45 trades/14W-31L/+$1.62. Ruling: no boundary
+change at n=2. Both rows are the SAME sd-sensitivity shape the veto was
+built for (`e056578ff5cf`'s note: "sign holds (No) but size flips on the
+sd judgment parameter"): the >=31% row's point estimate (0.81) sat on the
+correct side of 0.5 but the veto declined the market-implied No edge
+that the loose-sd tail created, and that declined No trade lost because
+SPD did clear 31%. The 28-31% sibling declined a Yes-side edge built on
+the same Gaussian and also lost, since the outcome landed in the >=31%
+bucket, not 28-31%. Net: the veto avoided nothing here (the market was
+right, the self-built Gaussian tails were not) — consistent with this
+family's standing weakest-class read, not a new failure mode.
+
+**2026-09-22 04:1xZ update (RETRO-20260922-0415; LIGHT tick, cloud;
+resolve.py settled 0 bets and 4 forecasts, 1 `outside-view-veto`, graded
+same-commit per the DEEP-2026-08-23 rule).** Berlin Grüne 14-17% of
+second votes, official Grüne share landed inside the bracket (Yes) — the
+declined No-side counterfactual trade lost:
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Berlin Grüne 14-17% (8601f47e8b85) | 0.50 / 0.625 | No | +0.120 | Yes | −5.00 |
+
+Mechanical ledger after this row (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`): 151 settled declined forecasts, 143
+fillable CF trades, 101 events, 60W/83L, pnl +$55.11, brier_delta
++0.0342, held-out +$63.30 (was 150/142/100/60W-82L/+$60.11/+0.0337/
++$69.12 before this row). Side split: no 106 rows/98 trades/46W-52L/
++$53.49; yes 45 rows/45 trades/14W-31L/+$1.62 (row adds to the No side).
+Ruling: no boundary change at n=1. The row's own note put the No-side
+edge at 0.116 by hand; the tool computes 0.120 and auto-tags subclass
+`fact-finality` even though the note explicitly argues this is a
+self-modeled Gaussian bucket, not a fact-final case — a labeling
+mismatch worth a future reconcile pass, not acted on here. The veto
+declined this exact class (behavioral point-estimate Gaussian, sd
+sensitivity 0.074-0.169 across the note's own sweep) and it lost again,
+consistent with the family's standing weakest-class read.
+
+**2026-09-22 06:1xZ update (RETRO-20260922-0619; LIGHT tick, cloud;
+resolve.py settled 0 bets and 5 forecasts, 2 `outside-view-veto`, graded
+same-commit per the DEEP-2026-08-23 rule).** Claude Opus Sep21 release
+market (4627751) settled No — the two declined No-side counterfactual
+trades from the estimate's first two supersede snapshots both won (the
+third and final snapshot, est 0.05, was `no-edge`, not on this table):
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Opus Sep21 snap 1 (668120246d84) | 0.04 / 0.3665 | No | +0.324 | No | +2.86 |
+| Opus Sep21 snap 2 (d54f8f258424) | 0.68 / 0.8275 | No | +0.091 | No | +16.83 |
+
+Mechanical ledger after these rows (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`): 153 settled declined forecasts, 145
+fillable CF trades, 102 events, 62W/83L, pnl +$74.81, brier_delta
++0.0314, held-out +$82.99 (was 151/143/101/60W-83L/+$55.11/+0.0342/
++$63.30 before these rows). Side split: no 108 rows/100 trades/48W-52L/
++$73.18; yes 45 rows/45 trades/14W-31L/+$1.62 (both rows add to the No
+side). Check: 73.18 + 1.62 = 74.80 ≈ 74.81 (rounding) ✓.
+
+Ruling: no boundary change at n=2, both wins. Snapshot 2's own estimate
+(0.68) was the weaker of the pair — it leaned toward Yes on an unsourced
+book jump the row's own note admits it "cannot see behind" — but the veto
+still declined the bet on estimate-distrust grounds regardless of
+direction, and the declined No-side trade won anyway because the market
+itself never fully priced the leak in either (No-side edge stayed
+positive, just thinner: +0.324 at snapshot 1 down to +0.091 at snapshot
+2). The veto is doing its job independent of estimate quality here; the
+estimate-quality miss is graded in RETRO-20260922-0619, not this table.
+
+**2026-09-22 08:1xZ update (RETRO-20260922-0813; FULL cycle, cloud;
+resolve.py settled 0 bets and 3 forecasts, all 3 `outside-view-veto`,
+graded same-commit per the DEEP-2026-08-23 rule).** Resident Evil
+opening-weekend box office, three sibling brackets on the same event
+(e:956520) — actual 3-day opening landed in the 60-65m bracket. The
+declined No-side trade on 65-70m won; the declined Yes-side trade on
+55-60m and the declined No-side trade on 60-65m both lost:
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Resident Evil 55-60m (94f5d2c84c0f) | 0.48 / 0.283 | Yes | +0.174 | No | -5.00 |
+| Resident Evil 60-65m (9e900c404320) | 0.44 / 0.6255 | No | +0.131 | Yes | -5.00 |
+| Resident Evil 65-70m (299cd54171c9) | 0.03 / 0.0955 | No | +0.061 | No | +0.50 |
+
+Net this batch: **-$9.50** (1W/2L).
+
+Mechanical ledger after these rows (`core/counterfactual.py ledger
+--skip-reason outside-view-veto`): 156 settled declined forecasts, 148
+fillable CF trades, 103 events, 63W/85L, pnl +$65.31, brier_delta
++0.0328, held-out +$66.00 (was 153/145/102/62W-83L/+$74.81/+0.0314/
++$82.99 before these rows). Side split: no 110 rows/102 trades/49W-53L/
++$68.68 (adds the two No-side rows, net -$4.50); yes 46 rows/46 trades/
+14W-32L/-$3.38 (adds the one Yes-side row, -$5.00).
+
+Ruling: no boundary change at n=3. The model's own ladder (50-55m 0.05,
+55-60m 0.48, 60-65m 0.44, 65-70m 0.03) put the most weight one bracket
+below where the market and the actual outcome landed — the row's own
+note flagged this gap at record time ("the book sits one bracket above
+the trade press") and it played out exactly that way. Box-office's
+mechanical-ledger category line stays negative (13 rows, 6W/7L,
+-$21.60, brier_delta +0.0117) — this batch is the veto's rationale
+playing out as expected, not a new failure mode; the standing veto
+stays shut.
+
+**2026-09-22 ~18:15Z update (FULL cycle, cloud; resolve.py settled 14
+forecasts, 2 `outside-view-veto`).** Both rows are the Trump x Greenland
+deal-by-Sep23 pair (market 4712116), `fact-finality` subclass (signing
+scheduled/expected during UNGA week but not yet an immutable fact at
+research time) — two separate forecasts on the same market at different
+times of day, not a supersession: the No-side row (935afbfc7d19,
+researched 2026-09-20 00:18Z, est No=0.40 vs mid 0.25) and the Yes-side
+row (a893f32972f0, researched 2026-09-20 12:18Z, est Yes=0.90 vs mid
+0.74). The deal was in fact signed before the Sep23 deadline: market
+resolved Yes.
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Trump-Greenland Sep23 No (935afbfc7d19) | 0.40 / 0.25 | No | +0.140 | Yes | -5.00 |
+| Trump-Greenland Sep23 Yes (a893f32972f0) | 0.90 / 0.74 | Yes | +0.150 | Yes | +1.67 |
+
+Net this batch: **-$3.33** (1W/1L). Mechanical ledger after these rows
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`): 158
+settled declined forecasts, 150 fillable CF trades, 104 events, 64W/86L,
+pnl +$61.97, brier_delta +0.0327, held-out +$62.67 (was 156/148/103/
+63W-85L/+$65.31/+0.0328/+$66.00 before these rows). Side split: no 111
+rows/103 trades/49W-54L/+$63.68 (adds the No-side row, -$5.00); yes 47
+rows/47 trades/15W-32L/-$1.71 (adds the Yes-side row, +$1.67).
+
+Ruling: no boundary change at n=2. Both rows are `fact-finality`
+subclass (37 rows, +$95.69, the ledger's single best-performing
+subclass) — this pair nets slightly negative (-$3.33) but sits well
+inside that subclass's noise. The Yes-side row is the more interesting
+one: the veto correctly followed its own rule (signing not yet an
+immutable fact at research time) on a trade that would have paid
+(edge 0.15, and it won) — the known, already-quantified cost of keeping
+this gate shut rather than a new failure mode. Full grading in
+RETRO-20260922-1815.
+
+**2026-09-22 20:15Z update (FULL cycle, cloud; 3 `ai-model-release`
+veto rows settled — Claude Opus release markets, both resolved Yes,
+see RETRO-20260922-2015).**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Opus by-Sep30 first read (`b52006c6d15c`) | 0.70 / 0.805 | No | +0.100 | Yes | -5.00 |
+| Opus by-Sep30 re-check (`7f1358aa709a`) | 0.60 / 0.855 | No | +0.240 | Yes | -5.00 |
+| Opus exact-Sep22 re-check (`9ca6adf96fc8`) | 0.62 / 0.732 | No | +0.098 | Yes | -5.00 |
+
+Net this batch: **-$15.00** (0W/3L). Mechanical ledger after these rows
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`): 161
+settled declined forecasts, 153 fillable CF trades, 106 events, 64W/89L,
+pnl +$46.97, brier_delta +0.0337, held-out +$39.84 (was 158/150/104/
+64W-86L/+$61.97/+0.0327/+$62.67 before these rows). Side split: no 114
+rows/106 trades/49W-57L/+$48.68 (adds these three No-side losses,
+-$15.00); yes 47 rows/47 trades/15W-32L/-$1.71 (unchanged).
+
+Ruling: no boundary change at n=3. Same shape as every other
+`ai-model-release` veto row in this table — model directionally right,
+market closer, veto correctly withheld the bet. The sibling wide-spread-
+veto row on the same event family (`3de604a7cf7a`, exact-Sep22 first
+read) is entered below with the same-cycle REPAIR batch. Full grading in
+RETRO-20260922-2015.
+
+**2026-09-22 20:15Z REPAIR + update (FULL cycle, cloud; one
+`wide-spread-veto` row from this cycle's `ai-model-release` settlements,
+plus two pre-existing gaps `core/counterfactual.py reconcile` surfaced
+while preparing this entry — neither caught by a prior retro nor by the
+reconcile tool's own check, which only scans `outside-view-veto`; see
+RETRO-20260922-2015 for how each was found).**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Opus exact-Sep22 first read (`3de604a7cf7a`, wide-spread-veto) | 0.48 / 0.6855 | No | +0.127 | Yes | -5.00 |
+| Berlin Linke 5-10% margin (`3723b83673c1`, wide-spread-veto, settled 2026-09-22T02:03:42Z, graded in RETRO-20260922-0211, flagged missing by the 10:25Z TRIGGERED cycle today) | 0.40 / 0.754 | No | +0.109 | Yes | -5.00 |
+| Lowe's GAAP EPS beat (`df7062f3e89d`, wide-spread-veto, settled 2026-08-19T15:21:17Z, graded in RETRO-20260819-1522, never entered since) | 0.62 / 0.595 | Yes | -0.260 | Yes | +0.68 |
+
+Net this batch: **-$9.32** (1W/2L, on rows spanning three different
+settlement dates). Mechanical ledger after these rows
+(`core/counterfactual.py ledger --skip-reason wide-spread-veto`): 17
+settled declined forecasts, 15 fillable CF trades, 2 refused, 8W/7L,
+pnl -$17.99, brier_delta -0.0327, held-out -$15.17 (was 15/13/2 refused/
+8W-5L/-$7.99/-0.0684/-$3.67 before the two No-side additions; the
+Lowe's row's pnl was always inside these totals — settled over a month
+before the 09-17 baseline above — so only its table row is new, not its
+contribution to the sums). Side split: no 9 rows/7 trades/2W-5L/-$17.74
+(adds the two new No-side losses, -$10.00, was 7/5/2W-3L/-$7.74);
+yes 8 rows/8 trades/6W-2L/-$0.25 (unchanged — Lowe's was already
+counted here).
+
+Ruling: no boundary change at n=3 across two unrelated events plus one
+documentation-only backfill. The Lowe's row is the interesting one on
+method, not P&L: the "modest apparent edge" the original research
+quoted was against the market's *mid* (0.595); the mechanical ledger
+fills at the actual best ask (0.88) on an incoherent, spread-blown book,
+which turns the same row negative (-0.260) — the veto's own reasoning
+("if this is genuine live news the architecture cannot win the race
+anyway") was right for a reason beyond the spread-gate mechanics: the
+apparent edge was a mid-price illusion. It won on Yes anyway (small,
++$0.68, priced by the bad ask it would have had to pay), which is a
+lucky fill outcome, not evidence the mid-based edge was ever real.
+Full grading in RETRO-20260922-2015; RETRO-20260922-0211 and
+RETRO-20260819-1522 (unmodified) hold the original narrative grading
+for the other two rows.
+
+**2026-09-22 22:14Z update (LIGHT tick, cloud; 1 `outside-view-veto` row
+settled — GPT Luna release, see RETRO-20260922-2214).**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| GPT Luna release by-Sep22 (`328f88bd8da0`) | 0.45 / 0.7205 | No | +0.251 | Yes | -5.00 |
+
+Net this batch: **-$5.00** (0W/1L). Mechanical ledger after this row
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`): 162
+settled declined forecasts, 154 fillable CF trades, 107 events, 64W/90L,
+pnl +$41.97, brier_delta +0.0349, held-out +$34.84 (was 161/153/106/
+64W-89L/+$46.97/+0.0337/+$39.84 before this row). Side split: no 115
+rows/107 trades/49W-58L/+$43.68 (adds this No-side loss, -$5.00); yes 47
+rows/47 trades/15W-32L/-$1.71 (unchanged).
+
+Ruling: no boundary change at n=1. Same shape as every other
+`ai-model-release` veto row in this table — model directionally right
+(real chance of a release today) but underweighted (0.45 vs a market at
+0.72 that turned out closer to right), veto correctly withheld the bet.
+Full grading in RETRO-20260922-2214.
+
+**2026-09-23 22:1xZ update (LIGHT tick, cloud; 1 `outside-view-veto` row
+settled — 30y Treasury hit 5.39%, see RETRO-20260923-2215).**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| 30y Treasury hit 5.39% Sep (`03f07792d701`) | 0.42 / 0.615 | No | +0.180 | Yes | -5.00 |
+
+Net this batch: **-$5.00** (0W/1L). Mechanical ledger after this row
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`): 163
+settled declined forecasts, 155 fillable CF trades, 108 events, 64W/91L,
+pnl +$36.97, brier_delta +0.0358, held-out +$29.84 (was 162/154/107/
+64W-90L/+$41.97/+0.0349/+$34.84 before this row). Side split: no 116
+rows/108 trades/49W-59L/+$38.68 (adds this No-side loss, -$5.00); yes 47
+rows/47 trades/15W-32L/-$1.71 (unchanged). Check: 38.68 + (-1.71) = 36.97.
+
+Ruling: no boundary change at n=1. A self-modeled driftless touch read
+(close-only reflection) lost to a single-day +11bp 30y print on Sep 23
+(5.29 -> 5.40) that also hit the 10y 5.10 and 5y 4.90 rungs the same day
+— one rates-selloff event, not three independent confirmations. The veto
+correctly withheld the No bet. Full grading in RETRO-20260923-2215.
+
+**2026-09-24 00:1xZ update (LIGHT tick, cloud; 1 `outside-view-veto` row
+settled — Xi Jinping in US by Sep 23 resolved Yes, see
+RETRO-20260924-0015).**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Xi visit by Sep23 (`f5e8ad23ec2c`) | 0.75 / 0.895 | No | +0.140 | Yes | -5.00 |
+
+Net this batch: **-$5.00** (0W/1L). Mechanical ledger after this row
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`): 164
+settled declined forecasts, 156 fillable CF trades, 109 events, 64W/92L,
+pnl +$31.97, brier_delta +0.0359, held-out +$24.84 (was 163/155/108/
+64W-91L/+$36.97/+0.0358/+$29.84 before this row). Side split: no 117
+rows/109 trades/49W-60L/+$33.68 (adds this No-side loss, -$5.00); yes 47
+rows/47 trades/15W-32L/-$1.71 (unchanged). Check: 33.68 + (-1.71) = 31.97.
+
+Ruling: no boundary change at n=1. A compounded arrival-day haircut on an
+unofficial itinerary lost to the market; the next-day supersede already
+corrected it on sourced logistics. The veto correctly withheld the No bet.
+Full grading in RETRO-20260924-0015.
+
+**2026-09-24 17:2xZ update (FULL cycle, operator machine; 2
+`outside-view-veto` rows settled on the Xi State Arrival utterance
+event, see RETRO-20260924-1729).**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Xi arrival "China" 5+ (`ec3c94c891d7`) | 0.62 / 0.475 | Yes | +0.130 | No | -5.00 |
+| Xi arrival "Ballroom" (`6302b86d1d9a`) | 0.85 / 0.735 (No) | No | +0.110 | No | +1.76 |
+
+Net this batch: **-$3.24** (1W/1L). Mechanical ledger after these rows
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`): 166
+settled declined forecasts, 158 fillable CF trades, 111 events, 65W/93L,
+pnl +$28.73, brier_delta +0.0361, held-out +$17.83 (was 164/156/109/
+64W-92L/+$31.97/+0.0359/+$24.84). Side split: no 118 rows/110 trades/
+50W-60L/+$35.44 (adds Ballroom +$1.76); yes 48 rows/48 trades/15W-33L/
+-$6.71 (adds China 5+ -$5.00). Check: 35.44 + (-6.71) = 28.73.
+
+Ruling: no boundary change. The Yes-side block was correct (the estimate
+itself was wrong, see the count-threshold note in the utterance section);
+the No-side block on a 0/4 speaker-only base rate cost a small winner at
+an edge just over 0.10. One row each, too few to move the boundary.
+
+**2026-09-24 22:1xZ update (LIGHT tick, cloud; 2 `outside-view-veto`
+rows settled on the 30y Treasury Sep ladder, see RETRO-20260924-2213).**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| 30y Treasury hit 5.42% Sep (`7771a4b3b7ac`) | 0.33 / 0.245 | Yes | -0.040 | Yes | +8.51 |
+| 30y Treasury hit 5.45% Sep (`b8d163385f59`) | 0.20 / 0.106 | Yes | +0.090 | Yes | +40.45 |
+
+Net this batch: **+$48.96** (2W/0L). Mechanical ledger after these rows
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`): 168
+settled declined forecasts, 160 fillable CF trades, 111 events, 67W/93L,
+pnl +$77.70, brier_delta +0.0340, held-out +$66.80 (was 166/158/111/
+65W-93L/+$28.73/+0.0361/+$17.83). Side split: no 118 rows/110 trades/
+50W-60L/+$35.44 (unchanged); yes 50 rows/50 trades/17W-33L/+$42.26 (adds
+both rows). Check: 35.44 + 42.26 = 77.70.
+
+Ruling: no boundary change. Both rows belong to the same rates-selloff
+event as the 5.39 No-side loss (`03f07792d701`). Events stay at 111, and
+the ladder family nets +$43.96 on one event. The dip-below-5.21 leg
+(`3e4351bdb5c6`) is still open.
+
+**2026-09-25 03:1xZ update (FULL cycle, operator machine; 2
+`outside-view-veto` + 3 `wide-spread-veto` rows settled on the Xi
+state-dinner toast, see RETRO-20260925-0315).**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Xi toast "Economy" (`9a7a77a71c00`, outside-view-veto) | 0.22 / 0.435 | No | +0.200 | No | +3.62 |
+| Xi toast "SI" (`ab5a3803b119`, outside-view-veto) | 0.35 / 0.665 | No | +0.260 | No | +7.82 |
+| Xi toast "Trump" (`d805d4abc7c9`, wide-spread-veto) | 0.11 / 0.22 | No | +0.070 | No | +1.10 |
+| Xi toast "Garden/Rose" (`cdabc385b3cb`, wide-spread-veto) | 0.15 / 0.28 | No | +0.040 | No | +1.17 |
+| Xi toast "Million" 5+ (`b1957ef7af26`, wide-spread-veto; then bet as `674b6cfac193`) | 0.06 / 0.125 | No | +0.060 | No | +0.68 |
+
+Outside-view-veto: **+$11.44** (2W/0L). Mechanical ledger now 170 rows /
+162 trades / 113 events / 69W-93L / +$89.14 / dBrier +0.0309 / held-out
++$78.24 (was 168/160/111/67W-93L/+$77.70/+0.0340/+$66.80). Side split:
+no 120/112/52W-60L/+$46.88 (adds both); yes 50/50/17W-33L/+$42.26
+(unchanged). Check: 46.88 + 42.26 = 89.14.
+
+Wide-spread-veto: **+$2.95** (3W/0L). Ledger now 20 rows / 18 trades /
+11W-7L / -$15.04 / dBrier -0.0330 / held-out -$12.22 (was 17/15/8W-7L/
+-$17.99/-0.0327/-$15.17). Side split: no 12/10/5W-5L/-$14.79 (adds all
+three); yes 8/8/6W-2L/-$0.25 (unchanged). Check: -14.79 + -0.25 = -15.04.
+
+Ruling: no boundary change. One event; the Million row duplicates a
+placed bet. The No-side speaker-only tally in the utterance section
+tracks whether the 0.10 boundary costs this family winners.
+
+**2026-09-25 06:44Z update (LIGHT tick, cloud; 1 `outside-view-veto` row
+settled, Xi state-dinner toast "Melania," see RETRO-20260925-0644.)**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Xi toast "Melania" (`5ee6e91cd3d2`) | 0.83 / 0.68 | Yes | +0.110 | Yes | +1.94 |
+
+Net this batch: **+$1.94** (1W/0L). Mechanical ledger after this row
+(`core/counterfactual.py ledger --skip-reason outside-view-veto`): 171
+rows / 163 trades / 114 events / 70W-93L / +$91.08 / dBrier +0.0303 /
+held-out +$85.20 (was 170/162/113/69W-93L/+$89.14/+0.0309/+$78.24). Side
+split: no 120/112/52W-60L/+$46.88 (unchanged); yes 51/51/18W-33L/+$44.20
+(adds this row). Check: 46.88 + 44.20 = 91.08.
+
+Ruling: no boundary change. Same speaker-only Melania base rate family as
+the arrival-toast row (`8b059c23c86a`, also won); the veto keeps declining
+a real edge on a small-n base rate that keeps paying off, but n=2 same-day
+same-family rows is not independent evidence for loosening it.
+
+**2026-09-25 07:48Z update (FULL cycle, operator machine; 1
+`outside-view-veto` row settled, Xi state-dinner toast "Ballroom," see
+RETRO-20260925-0748.)**
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Xi toast "Ballroom" (`f0790f007a85`) | 0.15 / 0.315 | No | +0.140 | Yes | -5.00 |
+
+Net this batch: **-$5.00** (0W/1L). Mechanical ledger after this row:
+172 rows / 164 trades / 115 events / 70W-94L / +$86.08 / dBrier +0.0316 /
+held-out +$80.20 (was 171/163/114/70W-93L/+$91.08/+0.0303/+$85.20). Side
+split: no 121/113/52W-61L/+$41.88 (adds this row); yes 51/51/18W-33L/
++$44.20 (unchanged). Check: 41.88 + 44.20 = 86.08.
+
+Ruling: no boundary change. The veto did its job: it kept a $5 loss off
+the ledger. See the utterance section for the tally and the topical-word
+analogue rule.
+
+**2026-09-23 DEEP REPAIR (documentation-only backfill; no totals
+change).** `core/counterfactual.py reconcile` lists 9 settled
+outside-view-veto rows graded narratively in this section ("named
+elsewhere in the section") but never entered as table rows — all
+settled 2026-08-10 through 2026-09-02, before or during the era when
+the table format stabilised. Their P&L has ALWAYS been inside the
+mechanical ledger's running totals (the tool reads forecasts.jsonl
+directly), so the totals above (162 rows / 154 trades / 64W/90L /
++$41.97 / +0.0349) are unchanged by this entry; only the table rows
+were missing. Values below are the mechanical ledger's own (est/mkt in
+own-side convention, CF P&L at $5 flat):
+
+| Row | est vs mkt | Side | Realizable edge | Result | CF P&L |
+|---|---|---|---|---|---|
+| Hong WI primary <5% (`03901079bd63`) | 0.09 / 0.089 | Yes | -0.017 | No | -5.00 |
+| Hichilema Zambia (`fa185b55a5c3`) | 0.87 / 0.92 | No | +0.040 | Yes | -5.00 |
+| Musk 140-159 tweets (`70331099597c`) | 0.007 / 0.052 | No | +0.044 | No | +0.27 |
+| Musk 160-179 tweets (`c24926a5c9d7`) | 0.205 / 0.175 | Yes | +0.025 | Yes | +22.78 |
+| Musk 200-219 tweets (`7808b6f5a4ef`) | 0.215 / 0.265 | No | +0.045 | No | +1.76 |
+| Gold hit $4,600 Aug (`90fafe7b3c2a`) | 0.327 / 0.219 | Yes | +0.099 | Yes | +16.93 |
+| Spider-Man domestic gross (`e9f9221a3afb`) | 0.90 / 0.85 | Yes | +0.040 | Yes | +0.81 |
+| Beijing 26°C Aug 25 (`25cb8672c568`) | 0.23 / 0.22 | Yes | +0.000 | No | -5.00 |
+| GPT-6 by Sep 15 (`846f0e23a43a`) | 0.28 / 0.865 | No | +0.570 | Yes | -5.00 |
+
+Batch sum +$22.55 (5W/4L) — already counted in every total above and
+below since the rows settled.
+
+Units note for future reconcile reads (DEEP-2026-09-23): per-row CF P&L
+in this section's tables is DOLLARS at the $5 flat stake; `reconcile`
+prints per-row pnl in 1u = pnl/5 units, so a hand `-5.00` against a
+ledger `-1.00u` is the SAME number, not a diff. Of the 71 "C. rows in
+both that differ" in today's reconcile run, ~60 are exactly this units
+convention; the residue is (i) early rows whose hand edge was quoted
+against the MID rather than the realizable ask (Astra 0.783-hand vs
+0.056-ledger is the worst; the Lowe's row in the 2026-09-22 REPAIR
+documents the same mid-vs-ask illusion), and (ii) rows the fill model
+refuses (entry outside [0.02, 0.95] or no bid) where the hand table
+recorded a fill anyway. Historical rows are NOT being rewritten to
+match — the mechanical ledger is authoritative for every ruling and
+gate; the hand table is the narrative index. An operator proposal to
+make `reconcile` units-aware and to extend its B-check beyond
+outside-view-veto is filed in journal/proposals.md (2026-09-23 pass).
+
+## Outside-view-veto relaxation fork (pre-registered, DEEP-2026-09-08, per operator note 2026-09-07 ~20:50Z)
+
+The veto on judgment estimates with claimed edge > 0.10 stays. This fork
+defines IN ADVANCE the only evidence that loosens it, so the decision is
+never made post hoc. Read the numbers from
+`python3 core/counterfactual.py ledger --skip-reason outside-view-veto`
+(run `python3 core/screen_replay.py events --limit 200` first so `evts`
+is current). ALL THREE must hold:
+
+1. **brier_delta negative (model ahead of the market) in the two MOST
+   RECENT consecutive walk-forward folds.** Tightened from the operator
+   note's "two consecutive folds" to the two most recent, and the ledger
+   argues for the tightening: today's folds f3/f4 carry the slice's best
+   CF pnl (+$1.56 / +$91.94) with its WORST calibration (per-fold dBrier
+   +0.0488 / +0.0200) — an old good patch must not unlock a carve-out
+   while the newest money is being made with worse-than-market beliefs.
+   The tool prints fold_pnl but not per-fold dBrier (operator proposal
+   filed 2026-09-08 to add it); until then, compute it read-only: sort
+   the slice's `--json` rows by ts, split into `folds` equal contiguous
+   slices, and average (est−outcome)² − (market−outcome)² per fold.
+2. **Net CF pnl positive in those same two folds** (the tool's fold_pnl
+   columns, mechanical today).
+3. **At least 40 independent gamma events in the slice** (the tool's
+   `evts` column).
+
+Status 2026-09-08: **NOT MET.** (1) fails — per-fold dBrier ≈ f0 +0.011,
+f1 −0.000, f2 −0.009, f3 +0.049, f4 +0.020 (recipe above; the tool's
+own fold boundaries may shift these slightly): the two most recent folds
+are both positive. (2) holds on f3/f4 (+$1.56/+$91.94). (3) holds: 80
+events ≥ 40. Money without calibration — the fork stays shut.
+
+Status 2026-09-10 (DEEP): **NOT MET.** Slice now 124 rows / 116 CF
+trades / 82 events / +$109.91 / overall dBrier +0.0264 (adds the Chewy
+ffc3fcdcbaa6 CF win +$3.62 and the China-CPI 19cf14c87979 CF loss −$5
+since the 09-08 check). (1) fails — per-fold dBrier by the recipe: f0
++0.0111, f1 −0.0002, f2 −0.0209, f3 +0.0981, f4 +0.0434; the two most
+recent folds are both positive (fold boundaries shifted with the 2 new
+rows, which is why f3/f4 read worse than the 09-08 quote — same rows,
+different splits). (2) holds (fold pnl f3 +$1.56, f4 +$90.56). (3)
+holds: 82 events ≥ 40. Same verdict as 09-08: the newest money is
+being made with worse-than-market beliefs; the fork stays shut.
+
+Status 2026-09-11 (DEEP): **NOT MET.** Slice now 126 rows / 118 CF
+trades / 84 events / +$114.43 / overall dBrier +0.0246 (adds the two
+RNC utterance CF wins 36ff9feec021 +$2.58 and 87736f3e8ab9 +$1.94,
+settled by the deep retro's resolve run). (1) fails again — per-fold
+dBrier by the recipe: f0 +0.0099, f1 −0.0009, f2 −0.0239, f3 +0.0977,
+f4 +0.0394; the two most recent folds are both positive. (2) holds
+(fold CF pnl f3 +$1.56, f4 +$95.08). (3) holds: 84 events ≥ 40. Fourth
+consecutive reading of money-without-calibration; the fork stays shut,
+and the fact-finality subclass (n=29, CF +$122.08, dBrier +0.0419)
+shows the same shape inside itself.
+
+Status 2026-09-12 (DEEP): **NOT MET.** Slice now 130 rows / 122 CF
+trades / 88 events / +$105.30 / overall dBrier +0.0276 (adds the two
+Aug-CPI No-leg rows 5a6d5321c25a −$5.00 and 79e72c3002c3 +$5.87, table
+extended above). (1) fails — per-fold dBrier by the recipe (all-rows
+frame, which reproduces the tool's printed fold pnl −28.81/+38.89/
+−7.29/+4.38/+98.14 exactly): f0 +0.0083, f1 −0.0118, f2 +0.0094, f3
++0.0754, f4 −0.0092 — f3 positive, so "two most recent both negative"
+fails. (2) holds (fold CF pnl f3 +$4.38, f4 +$98.14). (3) holds: 88
+events ≥ 40. Fifth consecutive NOT MET — but note honestly: f4's
+dBrier is negative for the FIRST time in five readings. One more batch
+of well-calibrated declines would put the two newest folds in genuine
+contention; nothing to act on today (fold boundaries shift with n and
+the f4 flip is partly the +$5.87 CPI win), but the next deep retro
+should recompute before assuming the verdict is static.
+
+Status 2026-09-21 (DEEP): **NOT MET — first reading where BOTH numeric
+gates fail.** Slice now 145 rows / 137 CF trades / 101 events / +$66.07
+/ overall dBrier +0.0361 (includes the AfD-MV CF win `506bc4c8087e`,
++$1.41, the month's strongest single veto counterexample — graded in
+the table above). (1) fails: per-fold dBrier by the recipe (all-rows
+frame, 5 contiguous folds of 29): f0 +0.0104, f1 −0.0062, f2 +0.0642,
+f3 +0.0323, f4 +0.0798 — the two most recent folds both positive, and
+f4 is the slice's worst fold. (2) fails for the first time: tool fold
+pnl [−4.01, +4.06, −17.42, +152.84, **−69.40**] — the newest fold is
+losing counterfactual money outright (the Mythos by-date cluster,
+weather, and the Israel–Lebanon family live there). (3) holds: 101
+events ≥ 40, freshly mapped. Sixth consecutive NOT MET, and the
+09-12 note's f4-flicker resolved the wrong way once 15 more rows
+landed: the newest fifth of the slice is now miscalibrated AND
+unprofitable. The AfD-MV win is exactly the row this pre-registration
+was built to withstand — a vivid single counterexample must not reopen
+a fork that the slice-level arithmetic is failing harder than ever.
+
+Status 2026-09-22 (DEEP): **NOT MET — second consecutive double-gate
+failure.** Slice now 151 rows / 143 CF trades / 101 events / +$55.11 /
+overall dBrier +0.0342 (adds the six German-election veto rows graded
+same-tick by the hourly cycles: Berlin SPD pair CF +$9.03, MV SPD pair
+CF −$10.00, Berlin Grüne CF −$5.00, plus the fresh event re-cluster).
+(1) fails: per-fold dBrier by the recipe (5 contiguous folds of 30/31):
+f0 +0.0093, f1 −0.0063, f2 +0.0841, f3 +0.0386, f4 +0.0449 — the two
+most recent folds both positive (boundaries shifted with the 6 new
+rows, which is why f2–f4 read differently from the 09-21 quote; same
+recipe). (2) fails: tool fold pnl [−8.19, +31.11, −43.96, +122.33,
+**−46.18**] (recipe's contiguous split agrees on the sign: f4 −60.37)
+— the newest fold still loses CF money. (3) holds: 101 events ≥ 40.
+Seventh consecutive NOT
+MET. The German veto cluster's vote-share rows are now settled and
+split 2W/3L as CF trades — the veto's weakest class (self-built
+poll-Gaussian brackets) stayed its weakest class through an election
+week that was the fork's best chance to open. The fork stays shut.
+
+Status 2026-09-23 (DEEP): **NOT MET — third consecutive double-gate
+failure.** Slice now 162 rows / 154 CF trades / 107 events / +$41.97 /
+overall dBrier +0.0349 (adds the window's 9 settled veto rows, net CF
+−$32.83 1W/8L: Resident Evil trio −$9.50, Trump-Greenland pair −$3.33,
+Opus by-Sep30/exact-Sep22 trio −$15.00, GPT Luna −$5.00, plus the
+2026-09-23 DEEP REPAIR backfill of 9 pre-existing rows already inside
+the totals). (1) fails: per-fold dBrier by the recipe (5 contiguous
+folds of 32/33): f0 +0.0043, f1 +0.0042, f2 +0.0767, f3 +0.0391, f4
++0.0484 — the two most recent folds both positive, f4 worse than
+yesterday. (2) fails: tool fold pnl [+7.13, +7.85, +2.02, +84.71,
+**−59.74**] — the newest fold's CF loss deepened (−46.18 → −59.74) as
+the day's four `ai-model-release` No-reads all resolved Yes. (3)
+holds: 107 events ≥ 40. Eighth consecutive NOT MET. The window is the
+purest illustration yet of why the fork stays shut: 8 of the day's 9
+veto declines SAVED paper money (net CF −$32.83; only the Greenland
+Yes-side row would have paid, +$1.67), which is the veto working — and
+the same rows are calibration losses against the market, which is gate
+1 failing. Money saved by being wrong less expensively than a fill
+would cost is not evidence the model should be allowed to bet these.
+
+Status 2026-09-24 (DEEP): **NOT MET — fourth consecutive double-gate
+failure.** Slice 164 rows / 156 CF trades / 109 events / +$31.97 /
+overall dBrier +0.0359 (adds the 30y-Treasury 5.39% No-read
+`03f07792d701` −$5 and the Xi-by-Sep23 arrival-day row `f5e8ad23ec2c`
+−$5, both resolved Yes). (1) fails: per-fold dBrier by the recipe (5
+contiguous folds of 32/33): f0 +0.0043, f1 +0.0045, f2 +0.0563, f3
++0.0597, f4 +0.0538 — the last THREE folds (everything since
+2026-08-25) sit at +0.054 to +0.060, an order of magnitude worse than
+f0/f1; divergent reads have got worse, not better. (2) fails: tool fold
+pnl [+7.13, +7.85, +2.02, +84.71, **−69.74**]. (3) holds: 109 events.
+Ninth consecutive NOT MET. The window's two veto losses share the
+recurring shape: a "won't happen by the date" read against a market
+pricing the event likely (Treasury rung, Xi arrival — same family as
+the four `ai-model-release` No-reads on 09-22/23).
+
+Status 2026-09-25 (DEEP): **NOT MET — fifth consecutive double-gate
+failure, but the newest fold improved.** Slice 170 rows / 162 CF trades
+/ 113 events / +$89.14 / overall dBrier +0.0309 (adds the window's 6
+rows: 30y 5.42/5.45 Yes +$48.96, Xi arrival China 5+ −$5.00 / Ballroom
++$1.76, Xi toast Economy +$3.62 / SI +$7.82; tool reproduced to the
+cent). (1) fails: per-fold dBrier by the recipe (5 contiguous folds of
+34): f0 −0.0035, f1 +0.0113, f2 +0.0589, f3 +0.0603, f4 **+0.0277**
+(was +0.0538) — f4 halved on two events (Xi summit day, one rates
+selloff), still positive. (2) fails: tool fold pnl [+10.90, −5.92,
++12.19, +72.37, **−0.40**]. (3) holds: 113 events. Tenth consecutive
+NOT MET. The +$57 CF jump in one day is longshot payoff variance
+(+$40.45 from one 0.106 fill on the 30y 5.45 rung), not calibration:
+read dBrier, not CF pnl. Note: 4 of 162 CF trades (net −$6.49,
+incl. `7771a4b3b7ac` +$8.51) had non-positive realizable edge at the
+ask and could never have been placed; immaterial to the verdict.
+
+Status 2026-09-26 (DEEP): **NOT MET — eleventh consecutive; gate 2 now
+holds, gate 1 regressed.** Slice 173 rows / 165 CF trades / 116 events /
+71W-94L / +$87.41 / overall dBrier +0.0312 (adds Xi-dinner Ballroom
+`f0790f007a85` −$5.00, Melania `5ee6e91cd3d2` +$1.94, Yabloko
+`56ed434261a5` +$1.33; tool output, held-out +$81.52). (1) fails: per-fold dBrier by the recipe
+(5 contiguous folds of 34-35): f0 −0.0035, f1 +0.0058, f2 +0.0770, f3
+**+0.0406**, f4 **+0.0363** (f4 was +0.0277 yesterday — the halving did
+not hold one day later). (2) holds: tool fold pnl [+5.90, −1.99, +39.93,
++36.92, +6.66]. (3) holds: 116 events. Same reading as every day since
+09-08: CF money without calibration. No-side f3/f4 CF pnl is now
+−$5.95/−$17.16, so the No-side "nothing announced" candidate shape named
+below is currently the weaker side, not the stronger one.
+
+If the bar is ever MET: do not loosen the veto wholesale. Propose a
+NARROW carve-out for the best-evidenced sub-class only (current
+candidate shape: No-side timeline theses of the "nothing announced"
+kind), with a disagreement band, standard floors, one trade per event,
+and a kill switch armed in the same commit, per the mechanical-econ
+template below. Hourly cycles extend the table and never act on this
+fork; only a deep retro may propose the carve-out.
+
+
+## Mechanical-econ carve-out (enacted DEEP-2026-08-28, first loosening of the outside-view veto)
+
+A candidate may bet a >0.10 disagreement with the market — which the
+outside-view veto otherwise forbids — only when ALL of the following
+hold:
+
+1. **Mechanical official print:** the market resolves off a scheduled
+   official release (statistics agency, central bank) with a numeric,
+   interpretation-free criterion. No behavioral self-models (Musk,
+   box-office, social-post counts, weather-Gaussian), no
+   prelim-anchored guesses, regardless of claimed edge.
+2. **Named, reachable external benchmark, quoted at research time:**
+   the estimate is a distribution around a published consensus/survey
+   number or an official prior series with a validated revision/variance
+   history, and the rationale QUOTES the benchmark (source + number)
+   before the print. A self-built Gaussian, or one whose variance input
+   was unreachable (a recorded property-2 failure), does NOT qualify —
+   this is the UMich lesson (0/2, −2.00u): property-2 failure at
+   forecast time predicts veto-was-right at settlement.
+3. **Band 0.10–0.20 only.** Disagreement above 0.20 stays vetoed
+   outright — the counterfactual ledger's worst losses all live there.
+4. **Standard floors unchanged** (min_edge, max_spread, flat $5), and
+   at most ONE carve-out bet per print event: pick the single best leg,
+   no sibling ladders (CONN@CHI / ai-leaderboard correlated-exposure
+   lesson).
+
+**Gate-2 variance clause (DEEP-2026-08-29):** the variance input is part
+of the benchmark, not a free parameter. A distribution whose mean is a
+quoted consensus but whose dispersion is an unsourced round number is
+half a self-model — the NFP bracket set (release 2026-09-05, first live
+carve-out candidate) records in its own watch item that the edge SIGN
+flipped on the 70k-vs-90k std choice for several legs, and UMich (0/2,
+−2.00u) is what an unbenchmarked spread does at settlement. A carve-out
+bet therefore requires the rationale to quote a source for dispersion
+too (e.g., trailing realized consensus-miss spread computed from named
+release/consensus history), quoted at research time like the mean.
+No sourced dispersion → the row stays forecast-only regardless of
+apparent edge. This narrows gate 2; it loosens nothing.
+
+**NFP tail-risk flag (2026-09-04, RETRO-20260904-1613):** the Aug 2026
+NFP print landed >=150k against a cited consensus of ~53-56k — both this
+book's sourced sd=72k model and the market itself gave that outcome only
+~6-7%, and it happened. The standard-floor No bet on 0-50k (84167af841f7)
+won anyway, but for the wrong reason (the model's mean had moved DOWN on
+an ADP miss right before a large beat) — not evidence the sd-sourcing
+method works, more a reminder that a Gaussian with a survey-sourced sd is
+still likely to underweight genuine headline-NFP outliers. Its same-day
+sibling, the UR 4.1% No bet (609c98073a77), lost because its sd=0.12 was
+too WIDE relative to the market's 0.09 on an exact-bracket print — the
+two results point in opposite directions on "is my sourced dispersion too
+narrow or too wide," which at n=2 is not a basis for changing any sd
+input. Flagging only: don't read the NFP win as validating wide sds, and
+don't read the UR loss as validating tight ones, until more of this exact
+shape (sourced-sd self-model, standard floor, headline econ print)
+settles.
+
+**Pre-registered kill switch:** after 4 settled carve-out EVENTS or 6
+settled carve-out BETS (whichever comes first), if net realizable P&L
+≤ 0 or the agent is not ahead on dBrier in a majority, the carve-out
+reverts in full and the sub-class folds back into the general veto. Each
+carve-out bet is audited by the next deep retro. Evidence basis at
+enactment: fired-veto counterfactuals Japan GDP +0.85u / PCE +0.04u /
+BoK +2.03u (all agent-ahead) vs UMich −2.00u (excluded by gate 2); the
+margin is one bad print wide, which is why the kill switch is sized this
+small.
+
+**BoK watch-item grading notes (pre-registered asks (a) and (b)):**
+(a) live-CLOB-convergence-ahead-of-search — YES, reusable, but as a VETO
+input, not an edge: the 01:25Z cycle saw the book collapse to hike-0.972
+before any indexed news confirmed the announcement. For scheduled
+announcements on liquid books, the CLOB is structurally faster than
+WebSearch indexing, which means (i) a cheap "the market already knows"
+detector exists (quote the book before claiming an info edge on anything
+scheduled), and (ii) it is one more reason the GTA-VI-style liquid-book
+"market hasn't noticed" claim should be treated as self-refuting — this is
+now the second independent line of evidence for the thin/stale-book
+credibility condition pre-registered on c6f16acc55d9. (b) TRIGGERED-vs-
+FULL race on the same catalyst: n=1, the rebase collision was resolved
+correctly by dropping the redundant less-evidenced row; no coordination
+rule until it recurs — the existing cycle-start collision guard stays as
+is.
+
+**Gate-2 supporting evidence, Bank of Israel Aug/Sept decision
+(RETRO-20260901-1617):** two labels for the same rescheduled meeting
+(Aug-dated pair 631d616bf794/64c89e162ea1, Sept-dated pair
+4a5f7889b9de/a989d14ba8ff) both settled the same way — BoI cut, not held —
+against a qualitative-only "most forecasters expect a hold" read with no
+numeric survey found, on both my estimate (0.20/0.15 for cut) and the
+market's price (0.24/0.12). Both forecasts correctly stayed in the
+ordinary no-edge path (never eligible for the carve-out — gate 2 requires
+a quoted numeric consensus, not a qualitative one) and risked no capital.
+First concrete instance of a qualitative-only central-bank consensus
+missing the actual decision: n=1 real event, no rule change, but it
+validates gate 2's numeric-survey requirement rather than arguing for
+loosening it — a case exactly like this is what gate 2 exists to keep out
+of the carve-out.
+
+**Gate-2 supporting evidence, August CPI cluster (RETRO-20260911-1615):**
+10 forecast-only rows on the Aug-2026 CPI bracket ladders (headline MoM,
+core MoM, headline YoY, core YoY) all shared a Cleveland Fed nowcast as
+sourced mean but an unsourced sd (Knotek-Zaman recalled from memory, PDF
+unreadable at research time) — correctly excluded from the carve-out by
+gate 2. At settlement (headline MoM 0.4%, core MoM 0.3%, headline YoY
+3.4%, core YoY 2.4%), the market's tighter implied sd (~0.07) put more
+probability mass on the winning bracket than the own model's wider
+unsourced sd on 3 of 4 independent bracket families (headline MoM 0.34 vs
+market 0.465, headline YoY 0.345 vs 0.415, core YoY 0.376 vs 0.425); only
+core MoM matched the market, and that leg's edge came from a flagged
+directional mean-shift off the raw nowcast ("market ladder skews up," own
+mean 0.22 vs nowcast 0.20), not from the sd choice. Fifth line of evidence
+that an unsourced dispersion input underperforms the market's own implied
+spread — gate 2 stands. Forward note: shifting a nowcast-centered
+Gaussian's MEAN toward the market's bracket-ladder shape is a legible,
+gate-1-compatible adjustment; substituting a recalled-from-memory SD for
+the market's implied one is not, and should not be treated as
+"benchmarked" just because the mean half of the same model is sourced.
+
+**2026-08-21 update (18:11Z settlement): the Aug14-21 Musk weekly set's
+two >0.10-disagreement legs both settled, both LOST.** 240-259
+(cd3af116ed2a, No side, bid 0.252 vs est 0.16) lost to the actual count
+landing in that bracket — the model underweighted the bucket the market
+priced correctly. 280-299 (cc08840449e9, Yes side, ask 0.169 vs est 0.31)
+lost — the model overweighted the opposite tail, the same "confident
+middle/tail overweight" shape flagged as a watch pattern since
+RETRO-20260817-1913. Two more 0-for-2 behavioral self-model rows extend
+the pattern the Aug 18 fork already called MIXED-but-veto-stays; this is
+off-fork confirmation, not a new decision (no fork reopened).
+
+**Totals (2026-08-21, updated 18:11Z settlement): 22 realizable
+disagreement trades, 8W/14L, net −7.42u (−$37.10 at $5 flat).** Sub-classes
+now split by MODEL GENERATION, because the 2026-08-15/16 additions are the
+first settled rows from the 14-day empirical bootstrap (every earlier
+self-model row was Gaussian or naive): pre-bootstrap self-model 1W/7L
+(−6.39u); bootstrap 2W/1L (+2.06u) — the three bootstrap rows are all
+complementary brackets on ONE realized tweet count (40-64 and 65-89 both
+lost, <40 won — one realized count, arithmetic ties all three legs
+together), so this is effectively n=1 independent outcome, off-fork, and
+buys no veto exception by itself (the <40 leg's miss — est 0.0146 on the
+outcome that happened — is exactly the "confident middle, wrong tails"
+shape to watch for on the still-open Aug 18 weekly fork; see
+RETRO-20260817-1913). Wide-spread rows: 1 realizable, won (+0.15u); the
+spread rule's entire settled cost remains one foregone ~+$0.77 win. Box-
+office rows (new 2026-08-18, see sub-class paragraph below) are pre-
+bootstrap-generation Gaussian self-model, 2W/2L (+0.75−1.00+1.00−1.00 =
+−0.25u), folded into the side split below but NOT into the behavioral
+pre-bootstrap self-model 1W/7L line (different domain, tracked
+separately). Side split, recomputed row-by-row from the table above
+(**correction #2, DEEP-2026-08-19**: the 18:16Z retro updated the ledger
+totals to 20 trades but left THIS side split at its 17-trade values
+("1W/6L −4.50u / 6W/4L +0.92u") — the second stale-subtotal instance in
+two days, same failure class as the +0.17u error corrected 2026-08-18
+01:12Z. Re-summed row-by-row from the table above, all 20 realizable
+rows: the three rows added 16:14–18:16Z are HD earnings (65aea7cd91f4,
+No-side, −1.00), Musk wk 180-199 (99feadecc33b, Yes-side, −1.00) and
+Musk wk 220-239 (cf16f6424af7, No-side, +0.16)): Yes-side 1W/7L
+(−5.50u); No-side 7W/5L (+0.08u), as of the 2026-08-18 settlement. The
+honest read at that point: the No-side stream was FLAT, not "solidly
+positive" — the +0.92u lead was three settlements old the moment it was
+cited. 7W/5L at +0.08u over 12 correlated rows was indistinguishable
+from zero edge; what survived was only the asymmetry (Yes-side
+disagreements uniformly bad, −5.50u at 1W/7L). The 2026-08-14
+No-side-sweep proposal's evidence was updated accordingly — the
+instrument argument (machine slice instead of hand-summed subtotals) is
+now proven twice, even as the edge claim weakens. Brier view: self-model
+n=11 mean dBrier still weighted down by the <40 miss (box-office rows are
+forecast-only entries, not bets, so they don't change this bet-brier
+figure).
+
+**2026-08-21 update:** two more rows settled, Musk wk 240-259
+(cd3af116ed2a, No-side, −1.00) and Musk wk 280-299 (cc08840449e9,
+Yes-side, −1.00) — re-summed row-by-row from the full table above, all 22
+realizable rows: **Yes-side 1W/8L (−6.50u); No-side 7W/6L (−0.92u)**. The
+No-side stream — the one slice that had survived as "flat, not
+positive" — is now net NEGATIVE for the first time. With only 6 No-side
+losses total this is still a small-n read (schedule.json's own guardrail:
+no category verdict below ~15), but the asymmetry claim itself needs
+restating: it is no longer "Yes-side bad, No-side flat," it is "both
+sides net negative, Yes-side worse." The 2026-08-14 No-side-sweep
+proposal's evidence should be re-checked against this flip at the next
+deep retro rather than re-cited at its stale +0.08u figure. Model
+generation for the two new rows is not cleanly classified here (the
+underlying note describes a week-avg/last-24h pace blend, not clearly
+either the pure pre-bootstrap Gaussian or the pure 14-day resample
+bootstrap) — leave the per-generation sub-totals below as last updated
+2026-08-18 and resolve the classification at the next deep retro rather
+than guess it on a light tick.
+
+**Generation ruling (DEEP-2026-08-22, resolving the deferral above):**
+both new rows are GAUSSIAN generation. The recorded notes (cd3af116ed2a,
+cc08840449e9) describe a week-avg/last-24h pace blend fed into a normal
+approximation (mean~274, sd~15) — Gaussian machinery on a point pace
+estimate, no resampling anywhere, so they extend the behavioral
+pre-bootstrap/Gaussian self-model line, not the bootstrap line:
+**behavioral Gaussian 1W/7L (−6.39u) → 1W/9L (−8.39u)** (sole win still
+Musk 160-179 +0.61). Full per-generation re-sum of all 22 realizable
+rows, verified row-by-row against the table: behavioral Gaussian 1W/9L
+−8.39u (SC Nordone, SC Fry, MN Flanagan, MN Craig, Musk 120-139,
+140-159, 160-179, 180-199, wk 240-259, wk 280-299); bootstrap 3W/2L
++1.22u (Musk 2d 40-64/65-89/<40 + wk 180-199/220-239 — all Musk counts,
+~2 independent realized outcomes); mechanical-econ Gaussian 1W/0L +0.85u
+(Japan GDP); mechanical wide-spread 1W/0L +0.15u (PPI 5.3%); box-office
+Gaussian 2W/2L −0.25u; earnings 0W/1L −1.00u (HD). Sum = −7.42u ✓
+matches the ledger total. The structural read this buys: every settled
+counterfactual PROFIT sits in mechanical or bootstrap classes; the
+behavioral point-estimate Gaussian is 1-for-10 — the sharpest statement
+yet of why the social-media-postcount bar and the >0.10 veto exist, and
+of what the Aug 28/29 fork is actually deciding (whether MECHANICAL
+disagreements deserve different treatment, not behavioral ones).
+
+**2026-08-23 update (DEEP): TI VISION/Yandex row added, one settlement
+late.** The row settled 2026-08-22 13:14Z and RETRO-20260822-1314 graded
+it narratively ("veto correct, would-be loss avoided") but did NOT extend
+this table — the first time a settled veto row was omitted from the table
+entirely (the two 2026-08-18/19 incidents were stale sub-totals, not
+missing rows). Row arithmetic: est(Yandex) 0.383 vs mkt
+0.235, Yes-side buy at recorded ask 0.24, realizable edge +0.143, Yandex
+lost → −1.00u. **Totals now 23 realizable trades, 8W/15L, net −8.42u**;
+side split re-summed row-by-row: **Yes-side 1W/9L −7.50u; No-side 7W/6L
+−0.92u** (unchanged, no No-side settlements). Generation ruling: this is
+a FIFTH class — a non-sharp odds-blend (internally-inconsistent
+aggregator + play-stats model, no sharp book; the recorded note itself
+flagged the data-quality problem) — not a self-model of any generation
+and not a clean book-devig. Per-generation re-sum: behavioral Gaussian
+1W/9L −8.39u; bootstrap 3W/2L +1.22u; mechanical-econ Gaussian 1W/0L
++0.85u; mechanical wide-spread 1W/0L +0.15u; box-office Gaussian 2W/2L
+−0.25u; earnings 0W/1L −1.00u; non-sharp odds-blend 0W/1L −1.00u. Sum
+−8.42u ✓. The structural read sharpens: every profitable class is
+mechanical or bootstrap; every class whose benchmark or model is
+narrative, behavioral, or data-quality-flagged is a net loser.
+**Mechanical rule (this miss's fix): a settlement retro on any
+outside-view-veto or wide-spread-veto row must extend this table — row,
+re-summed totals, side split — in the SAME commit as the retro; a veto
+retro without a table edit is a violation on its face, same
+copy-the-arithmetic pattern as the weld and cap rules.**
+
+**2026-08-24 update (16:22Z): BTC touch-$80k row added, first settled
+touch-anytime-family instance.** Driftless GBM barrier-touch self-model
+using real Deribit DVOL (~35% ann., dated ~Aug7) instead of an
+order-of-magnitude vol guess — the named hypothesis was whether a
+*measured* vol input makes this architecture trustworthy where the
+WTI/Gold/gas-price touch-anytime family (still open, unsettled) uses
+guessed vol. est P(No)=0.5034 vs ask 0.388, edge +0.115, outside-view-veto,
+no bet. Bitcoin touched $80k before Sep 1 (early resolution, as
+touch-anytime brackets do), so the No side LOST — the veto correctly
+blocked a $1 loss. Generation: this is a diffusion/barrier-touch
+self-model, not a point-Gaussian one, but shares the "unvalidated tail
+probability, self-model distrust" root cause as the pre-bootstrap
+Gaussian family — folded into the No-side split below rather than a new
+per-generation line, since n=1 doesn't yet justify a sixth class; revisit
+the classification once the WTI/Gold/gas siblings settle and there is
+more than one touch-family row to compare. Real DVOL did not rescue the
+architecture on this instance — same "confident middle, wrong tails"
+failure shape as the guessed-vol members. **Totals now 24 realizable
+trades, 8W/16L, net −9.42u**; side split re-summed row-by-row: **Yes-side
+1W/9L −7.50u; No-side 7W/7L −1.92u** (−7.50 + −1.92 = −9.42 ✓, unchanged
+Yes-side, one new No-side loss).
+
+**New sub-class, first instance (2026-08-17): mechanical-econ Gaussian
+self-model.** Japan GDP 0.0-0.8% is a Gaussian model on an official macro
+print (Normal around a named survey consensus, unvalidated sd), same model
+generation as the pre-bootstrap SC/MN/Musk rows but a different domain —
+those are behavioral/political predictions, this is a mechanical release
+the way econ-cpi/econ-ppi bets already are (DEEP-2026-08-14 "Known
+unknowns" mechanical-econ family, pooled brier_delta -0.0104 over 27
+settled bets/forecasts). This one row won at +0.2125 realizable edge,
+opposite the "0-for-multiple" framing the pre-bootstrap self-model rows
+established — but n=1 in this specific sub-class is not evidence of
+anything on its own (schedule.json's own guardrail: no category verdict
+below ~15 settlements). Track separately going forward; do not fold into
+the pre-bootstrap self-model 1W/7L line above, and do not grant a veto
+exception on this single row.
+
+**New sub-class, first instance (2026-08-18): box-office Gaussian
+self-model.** Four of the six-row box-office watch item (Oak Street
+17-20m, Spider-Man BND <66m/66-68m/68-70m) settled this tick — same model
+generation as the pre-bootstrap SC/MN/Musk rows (Normal around a
+tracker/studio-guide central estimate, unvalidated sd) but a third
+distinct domain: not behavioral/political, not a mechanical macro print,
+but entertainment-revenue self-modeling against same-day tracking data
+the agent lacks. 2W/2L, net −0.25u — the wins came on the No side where
+the model correctly judged the market's bracket-mass placement wrong; the
+losses were both Yes-side bets where the model trusted its own Gaussian
+over the market's tighter same-day-tracking-informed price (see
+Spider-Man 66-68m: 0.23 mid-disagreement, "textbook case for the veto,"
+and it did lose — but the market's true edge showed up on the Yes-side
+picks, not the No-side ones, splitting this set unlike the uniform
+pre-bootstrap behavioral losses). Per the schedule.json watch item, keep
+these OUT of the Aug 18 weekly bootstrap-fork claims — this is a
+different generation AND a different domain question. n=4 (2 realized
+independent events: Oak Street opening weekend, Spider-Man 3rd weekend)
+is far below any category-verdict bar; track separately, do not fold into
+the pre-bootstrap self-model 1W/7L line, no veto exception granted. Fifth
+row (20-23m, no-edge skip, not in this ledger) and PAW Patrol (no-edge
+skip, already settled 2026-08-17, not in this ledger) round out the
+six-row set; **set now fully settled (RETRO-20260818-0717): both no-edge
+rows resolved consistent with their price (no counterfactual entry, no
+calibration surprise at n=2), watch item closed.**
+
+**New sub-class, first instance (2026-08-18): earnings-beat
+external-consensus blend.** HD earnings (65aea7cd91f4) is neither a
+self-generated Gaussian nor a mechanical-econ survey-consensus model —
+it blends an external analyst consensus (Zacks non-GAAP EPS estimate)
+with the company's own historical beat rate and the Zacks ESP+Rank
+combo's historical conversion rate. Settled Yes; the model's No-side veto
+trade (est 0.68 vs bid 0.81, edge +0.13) lost, −1.00u (RETRO-20260818-1614).
+n=1, far below any category-verdict bar; track separately, do not fold
+into either the pre-bootstrap self-model or mechanical-econ lines, no
+veto exception implied by this single row — but it extends the "0-for-
+multiple large-claimed-edge" pattern into a fourth distinct model
+generation.
+
+**Decision implications:** (1) the 0.10 veto boundary stays — the full
+ledger is now net −4.58u (updated 2026-08-18 16:14Z, HD earnings row
+added) and the positive sub-slices are one correlated bootstrap event
+triple (2W/1L, not a clean 2W/0L), one n=1 mechanical-econ row, and a
+split 2W/2L box-office set that nets slightly negative, against a new
+n=1 earnings-beat loss; (2) whether the
+bootstrap deserves different treatment is exactly the pre-registered fork
+(§social-media-postcount), decided by the Aug 18 weekly legs — not here,
+not on off-fork rows;
+(3) the path to more placements is still expanding the mechanical/No-side
+realizable classes (econ prints, cross-market arithmetic); (4) every
+counterfactual claim uses this table's arithmetic — side, realizable ask,
+spread — never a narrative "would have lost/won". Counting note
+(DEEP-2026-08-17): the two settled Japan GDP rows (d684f9caff81 veto,
+b9170b30b10b no-edge) are complementary brackets on ONE print — one
+independent outcome, same convention as the Musk 2-day pair; only the
+veto row enters this table.
+
+**Pre-registered fork: mechanical-econ Gaussian veto sub-class
+(DEEP-2026-08-17).** The sub-class opened by Japan GDP (a Gaussian around
+a NAMED survey/consensus benchmark on an official mechanical print, vetoed
+at >0.10 disagreement) has three more tests already queued: the PCE
+cluster's vetoed legs (settle Aug 26), the BoK rate read (a8fa1e2ac41d,
+Aug 27), and the Canada GDP set (Aug 28, EXCLUDING fe954ed9f325 — recorded
+inverted, graded as process error). Decision rule, fixed now so it is not
+made post-hoc: **at DEEP-2026-08-28/29, if the sub-class has ≥3
+independent settled events (Japan GDP counts as one) with net realizable
+counterfactual P&L > 0 AND the agent ahead on dBrier in a majority, file
+an operator-visible playbook change proposing a NARROW carve-out**
+(candidate shape: mechanical official prints with a named external survey
+benchmark may bet at min_edge inside the 0.10–0.20 disagreement band,
+standard floors and spread rule unchanged; pure behavioral self-models —
+Musk, box-office — stay vetoed regardless). **If the record is net
+negative or mixed, the veto stays untouched and the sub-class folds into
+the general self-model line.** Readings for both outcomes are hereby
+pre-registered; hourly cycles extend the table but do NOT act on this
+fork early — the same discipline as the Musk Aug 18 fork. Rationale: the
+mechanical-econ family is the only consistently agent-favorable region
+(pooled forecast dBrier −0.0139 over 29 settled rows as of today,
+sibling-correlated so effective n is smaller), and the veto's only
+settled fire in this family cost +0.85u of realizable counterfactual.
+n=1 grants nothing; the fork defines what WOULD.
+
+**Exploration budget, UMich Consumer Sentiment brackets (2026-08-16 07:15Z,
+first test of this category).** Hypothesis: mechanical monthly print (final
+release Aug 28), same fact-finality profile as the econ-cpi/econ-ppi/econ-pce
+family that's the only settled-positive family so far — but this print has a
+PRELIMINARY release (Aug ~15) ahead of the final, so the open question is
+whether the prelim-to-final revision is a reachable, model-able benchmark or
+another self-model trap. Prelim August print (WebSearch): 51.0, down from
+54.5 consensus / July final 55.2, on a broad-based deterioration narrative
+(Hsu: short-term business-conditions expectations -11%, long-term -17%).
+Tried to source a clean historical prelim-vs-final revision series to model
+the Aug 28 final: FRED (`fredgraph.csv`), advisorperspectives.com, and
+tradingeconomics.com's data table all 403'd/were unextractable from this
+runner (same site-blocking pattern as the existing forebet/oddsportal/
+Metaculus entries) — only WebSearch news summaries were reachable, n=3
+recent months, one containing an internally-inconsistent arithmetic claim
+("7.5-point increase" that didn't match the two cited numbers). **Result:
+reachable for the point print (Yes) but NOT reachable for a trustworthy
+revision-variance benchmark (No)** — property 2 fails on the model input,
+not the headline fact. Built a deliberately fattened N(50.5, 3.5) anyway to
+see the shape: it still couldn't reproduce the market's ~13% combined mass
+on the >=58 brackets (own siblings.py sum_check 0.982, a well-calibrated
+book) without an unreasonably large sd — the same Gaussian-tail-
+underweighting mechanism already confirmed and fixed-via-bootstrap on the
+Musk brackets (2026-08-13/14), now found in a second, unrelated bracket
+category on first contact. Two brackets cleared the >0.10 outside-view
+boundary on this admittedly-shaky model (below-49.0 edge +0.157, ALSO
+spread-vetoed at 0.171; 49.0-51.9 edge -0.109, spread fine at 0.05) —
+declined both per the veto. The two most liquid/tradeable brackets
+(49-51.9 ask 0.43, 52-54.9 ask 0.27, spreads 0.05/0.01) showed only
+sub-floor edges (-0.109 already counted, -0.030) once measured against the
+live CLOB ask rather than gamma mid. Net: 0 bets, 7 forecasts recorded
+(a5703b36d60a…d5dcc12cdabe). **Category ruled in as mechanically reachable
+or the headline print, ruled out for self-modeling the revision without a
+better vintage dataset** — if revisited, only with either (a) a reachable
+prelim-to-final revision history (try `alfred.stlouisfed.org` specifically,
+untried this pass — ALFRED vintages differ from the plain FRED series URL
+that 403'd), or (b) treating the market's own book as the prior and looking
+only for a genuine information edge on top of it, not a from-scratch
+distribution.
+
+*Sep 2026 settlement tally (RETRO-20260925-1612):* the recalled
+prelim-to-final revision model (prelim 47.8, sd ~1.45, 15/24 inside,
+unsourced) went 2/2 vs the mid on its first settled test: 46.0-48.9
+own 0.64 vs 0.605 won (dBrier -0.026), 43.0-45.9 own 0.13 vs 0.185
+lost-as-predicted (dBrier -0.017); final 48.1 (+0.3 revision). Sibling
+brackets of one print = effective n=1, so the ruling above stands:
+forecast-only, `unvalidated-method`, no bets. It grants nothing until a
+sourced revision history (ALFRED) backs the sd, or >=4 independent
+monthly prints of the recalled model beat the mid.
+
+**Exploration budget, one-off exhibition match via single-book WebSearch,
+first test (2026-08-16 11:18Z).** Named property: does a one-off exhibition
+fixture with no dedicated odds-api league feed still have a trustworthy
+single-book line reachable by WebSearch (as opposed to the odds-aggregator
+"best odds across bookmakers" trap already ruled a no-go, Boca/Estudiantes
+2026-08-05), and does a 3-way h2h devig map cleanly onto a PM derivative
+submarket when the pool has no plain moneyline submarket for the event? FA
+Community Shield Arsenal vs Man City (today, not in the-odds-api's
+`soccer_epl` fixture list — a separate exhibition, not a league match).
+WebSearch surfaced a DraftKings-network article (dknetwork.draftkings.com,
+DK's own staff analysis piece quoting DK's own line, not an aggregator) with
+a clean 3-way moneyline: Arsenal +145 / Draw +240 / City +155 → power devig
+fair Arsenal 0.3764 / Draw 0.2633 / City 0.3603. The PM pool for this event
+has no plain "Arsenal wins"/"City wins" submarket, only derivative ones
+(draw-yes/no, five O/U total lines, BTTS, neither-scores-first); of those,
+only draw-yes/no maps directly onto a devigged h2h number without needing a
+goals-distribution model. PM draw market (3449517) ask Yes 0.29/bid 0.28,
+ask No 0.72/bid 0.71 — edges No +0.0167, Yes -0.0267, both well under
+min_edge_book_devig 0.07. **Result: reachable** (single named-book source
+held up, no aggregation-mixing needed) **and the devig-to-derivative-
+submarket mapping works cleanly for a draw/no-draw split specifically** —
+but **no edge**, the same efficient-market pattern as every other liquid PM
+sports book tested (UFC, MLB, tennis). The O/U and BTTS submarkets on this
+same event were left unresearched: matching them would require a total-
+goals number from the same single book, which this source didn't provide,
+and building one from a different book would repeat the cross-book-mixing
+trap — a genuinely separate, still-untested question (does a single book
+publish a matching total alongside its h2h for an exhibition fixture) if
+revisited.
+
+**Exploration budget, AAA gas-price touch-anytime brackets, first test
+(2026-08-17 00:24Z).** New candidate class found in scan: "Will gas hit $X
+(Low/High) by August 31?" (event 769509, 8 sibling legs, resolves Yes if the
+AAA US national-average regular-gas price touches the threshold on ANY day
+from market creation to end date — a barrier/touch condition, not a
+point-in-time print). Named property: is a mechanical, officially-sourced
+(AAA) commodity threshold, with weekly public data (AAA newsroom, EIA),
+reachable and modelable the way the mechanical-econ family (CPI/PPI) has
+been. Current price $4.0656 (Aug 16); the observed window since market
+creation (Jul 27 $4.096 -> Aug 16 $4.0656, weekly n=4) stayed inside a tight
+~$4.00-4.10 band. Built a no-drift diffusion/barrier-touch model (reflection
+principle) off a daily sigma estimated from those 4 weekly deltas (~2.1c/day,
+explicitly an UNVALIDATED small-n estimate, same caveat class as the Japan-
+GDP and UMich-sentiment SD choices) — gives near-zero touch probability for
+every one of the 8 thresholds (nearest legs $3.90/$4.25 at 3.5%/1.9%, the
+rest <0.5%), while live asks price every leg at 9-29%. **Result: the
+disagreement is large (>0.10) AND uniform across all 8 siblings
+simultaneously** (not one outlier leg) — the same shape as the already-
+documented siblings.py sum-check caveat (2026-08-05: thin/placeholder
+pricing produces sum-check flags that are a data-quality tell, not an edge)
+and a fourth instance of the Gaussian/diffusion-tail-underweighting failure
+already confirmed on Musk brackets and UMich sentiment. Book quality was
+mixed — the nearest leg ($3.90) actually has a real book (spread 0.02, ask
+depth 200), so this isn't purely a thin-book artifact there, which makes the
+uniform-gap read (self-model distrust) the operative reason over
+wide-spread-veto; several other legs are separately thin (null bid, spread
+up to 0.20). Declined all 8 as `outside-view-veto` (self-model + large
+disagreement, both-apply case per the DEEP-2026-08-14 taxonomy rule —
+estimate distrust dominates), 8 forecasts recorded (e2cbca37fe88, plus 7
+siblings same batch), 0 bets. **Category ruled in as mechanically reachable
+and worth tracking (public AAA/EIA source, new touch-barrier structure not
+seen before) but the naive small-n diffusion self-model is not trustworthy
+enough to act on here, exactly like the other self-model categories** — if
+revisited, needs either a validated historical daily-price series (not just
+4 weekly points) to get a real sigma, or evidence the 24h-volume=0 legs
+specifically are seeded/placeholder (would explain the wide-leg gaps without
+needing a sigma fix at all, leaving only the $3.90 leg's real-book gap to
+explain).
+
+**Odds-API domestic-league soccer (EPL), first clean-feed test (2026-08-17
+10:2xZ).** Named property, per the exploration-budget prioritization
+guidance above (reachable EXTERNAL benchmark, not another self-model
+instance): does `core/odds.py`'s clean feed cover a full domestic soccer
+league slate the way it already does MLB/WNBA, closing the gap where prior
+soccer book-devig tests were all one-off WebSearch lookups vulnerable to
+the cross-book-mixing and stale-line traps (§Search-result traps)? EPL's
+opening weekend (10 fixtures, Aug 21-24, 5-8 days out) is fully covered by
+`soccer_epl` — same 9 books as MLB/WNBA, same fixtures PM's pool lists.
+Single-book (BetMGM, present on every fixture) power devig of h2h + totals
+across all 10 games (24 win/draw markets + 7 totals lines, 31 PM markets
+total, one `odds` API call, 2 credits): every edge (devig fair vs PM mid)
+sat in **-0.018 to +0.012**, the same 0.00-0.02 efficiently-tracked band as
+MLB spreads (n=21), UFC moneylines (n=3), and ATP/WTA tennis (n=3) — no
+candidate approached min_edge 0.04, let alone min_edge_book_devig 0.07.
+**Result: reachable** (single-book multi-market coverage matches the PM
+pool 1:1, no cross-book-mixing needed, unlike the earlier WebSearch-only
+soccer traps) **but no edge** — domestic-league soccer joins the
+efficiently-tracked-book list. 31 forecasts recorded (skip-reason
+`no-edge`, fit-score 5, `soccer`/`soccer-totals` categories,
+`strategy/funnel.jsonl` 2026-08-17T10:20:00Z) for calibration; 0 bets.
+Category ruled in as clean-feed-coverable (a new use of an already-proven
+pipe, not a new self-model risk) — the open question if revisited is
+whether a THINNER domestic league (outside the-odds-api's top-tier
+coverage) shows a wider gap than EPL's tight one.
+
+**Exploration-budget prioritization (DEEP-2026-08-17).** Three of the
+window's four exploration first-tests (UMich sentiment, gas touch
+brackets, and the Musk 2-day set the day before) ended at the same
+conclusion: "category mechanically reachable, but the self-model
+(Gaussian/diffusion, unvalidated sd) is not trustworthy enough to act" —
+a finding already confirmed on Musk and UMich brackets. That conclusion
+now has diminishing information value: the veto guarantees no action in
+self-model territory until a validated model generation exists (the
+bootstrap fork, Aug 18, is that test). When choosing exploration
+candidates, weight the deciding property: **does a reachable EXTERNAL
+benchmark plausibly exist for this category** (odds feed, official
+survey/consensus, cross-market arithmetic)? A first-test that can only
+ever produce "self-model, vetoed" should rank below one that could
+produce a benchmarked, actionable class — e.g. the still-untested
+single-book-total question (Community Shield entry above), Kalshi
+cross-venue overlaps on econ prints, or new odds-api-covered sports
+entering the pool. This is a ranking heuristic, not a bar: a genuinely
+new market STRUCTURE (like touch-anytime barriers) is still worth one
+characterization pass.
+
+- Which categories actually have NEGATIVE brier_delta for me — score.py's
+  convention is brier_agent − brier_market, so negative = beating the
+  market; this line originally said "positive" and is one of the sources of
+  the sign drift fixed DEEP-2026-08-21. (Bet small and wide until
+  `core/score.py` shows n≥30 per category.)
+  **Status DEEP-2026-08-14:** the mechanical-econ family (econ + econ-cpi +
+  econ-ppi settled forecasts) is the first family-sized slice on the good
+  side: pooled brier_delta -0.0104 over 27 rows — but those rows are ~6
+  independent release events, so treat as a concentration signal (keep
+  routing research to official-print releases), not a proven edge. Both
+  settled econ bets won (a3bc5c4, b35963f465b4).
+- Whether thin esports books are exploitable or just wide.
+- Whether earnings markets are efficient at pricing whisper numbers.
+
+**ATP/WTA tennis, lower-liquidity retest (2026-08-17 20:xxZ).** The
+2026-08-14 test (n=3, liq $71-79k) said "revisit only if a lower-liquidity
+or in-play match shows a wider gap." Today's Cincinnati Open pool had three
+matches at meaningfully lower liquidity ($40.6k, $46.2k, $47.8k vs the prior
+$71-79k floor): Gauff/Li, Bouzkova/Jovic, Siniakova/Keys, all DraftKings
+power-devigged against the live CLOB ask. Edges: -0.0121, -0.0184, -0.0274
+(all favorite-side; underdog sides correspondingly small positive, max
++0.0174 Siniakova). **Result: book stayed just as tight (spread 0.01 on
+every leg) and just as accurate at $40-48k liquidity as at $71-79k** — no
+edge, same efficiently-tracked pattern. The lower-liquidity hypothesis is
+now tested and does not hold in this $40k+ range; if revisited, the
+interesting range is thinner still (sub-$20k) or genuinely in-play books,
+not this band. 4 forecasts recorded (e55e146a3195, d70b70d9ed59,
+1b550471f8f5, plus WNBA Dream/Aces 710604907e82 at edge -0.0227, same
+result), 0 bets.
+
+**Sub-$20k tennis, first instance (RETRO-20260921-1405).** Saint Tropez
+Challenger qualifying, Cassone vs Zahraj (`77126d78cefe`, liq $5.4k, market
+17 minutes old, no clean book feed): own 0.70 vs mid 0.755, favourite won,
+market ahead by 0.030 Brier. n=1, no sign of a lag in the thin band. The
+error was a consistency one: the note listed two signals (ranking gap,
+opponent's next-day fatigue) that both favoured the favourite, then recorded
+a number under the book on one unverified non-sharp scrape. Rule: when every
+qualitative signal in the note points the same way as the book's lean, the
+recorded number does not sit on the other side of the mid because of a
+single scrape of unknown freshness - centre on the mid and record
+`market-agrees`.
+
+**Exploration budget, commodity touch-anytime brackets (2026-08-18 07:23Z,
+first test of this category).** WTI/Gold "hit HIGH/LOW $X by Sep 1" markets
+(8 legs: WTI HIGH 90/95/100, WTI LOW 70/75, Gold HIGH 4500/4600/4700) — same
+architecture as the AAA gas-price touch-anytime family (DEEP-2026-08-16/17):
+a barrier-touch probability over a ~14-day window, self-modeled via GBM
+reflection-principle (P(touch) ≈ 2·(1−N(d)), d=ln(B/S₀)/(σ√T)) since no
+options-market-implied touch probability is available from any reachable
+source. Inputs: WTI spot ~$82 (source range $81.5-84.25), vol ~38%
+annualized (no precise sourced figure — general commentary on 2026 crude
+volatility only); Gold spot ~$4410 (source range $4390-4430), vol ~22%
+annualized (World Gold Council mid-year outlook: "below 30%, above the
+20-year average of 17%," moderated from a 50%+ spike earlier in 2026). Both
+vol inputs are order-of-magnitude estimates, not measured — this self-model
+carries the same "unvalidated sd" caveat as gas-price and box-office.
+Result: 3 of 8 legs disagreed with the market ask by >0.10 (WTI HIGH 95:
+model 0.048 vs ask 0.20; WTI HIGH 90: model 0.211 vs ask 0.46; Gold HIGH
+4600: model 0.327 vs ask 0.22) — routed to outside-view-veto per the
+standing self-model rule, regardless of claimed edge direction (2 WTI legs
+disagreed low, 1 Gold leg disagreed high — not a uniform directional bias
+this time, unlike gas-price's uniform-low pattern). The other 5 legs were
+within 0.08 of the market (WTI HIGH 100: 0.008 vs 0.09; WTI LOW 75/70 and
+Gold HIGH 4500 essentially at-market, gaps ≤0.04; Gold HIGH 4700: 0.139 vs
+0.07, gap 0.07) — recorded no-edge, no bet, consistent with declining
+self-modeled non-structural edges below the veto boundary too given the
+unvalidated-sd caveat and the family's poor settled track record elsewhere
+(Yes-side self-model 1W/6L per the veto counterfactual ledger). 8 forecasts
+recorded (d57caacce801, fbc6aff9c7f4, 5ae6bf97d6a9, 56f75d436269,
+7a00c4bdac14, 90fafe7b3c2a, afcf9c077796, 56091803227c), 0 bets. Grade at
+settlement (~Sep 1) against both the veto boundary and the vol-input
+accuracy (realized WTI/Gold range over the window will show whether ~38%/
+~22% ann. was in the right neighborhood).
+
+**New search-result trap: ISM PMI vs S&P Global PMI index conflation
+(2026-08-23 16:1xZ, ISM Services PMI Aug bracket, event 805222, release
+2026-09-03, first check).** WebSearch for "ISM Services PMI August 2026
+forecast" returned a snippet framing an already-published figure
+("S&P Global US Services PMI rose to 56.8 in August... well above market
+expectations of a drop to 54") as if it settled the ISM question — but the
+ISM (Institute for Supply Management) Non-Manufacturing/Services Index and
+the S&P Global Services PMI are two DIFFERENT surveys, different
+methodologies, materially different scale/levels (both happen to be
+reported as an index near 50-57, close enough to read as interchangeable
+at a glance), and different release dates within the same week. The 54.0
+"consensus" figure in the same result set was also unattributed to either
+index. Same failure shape as the stale-tense and cross-book-mixing traps:
+a plausible-looking number that answers a DIFFERENT question than the one
+the market resolves on. Treat any PMI search result as unusable unless it
+explicitly names "ISM" (not "S&P Global"/"Markit") AND ties the number to
+the specific ISM release the market cites — don't let matching index
+ranges substitute for matching index identity. Declined as
+benchmark-unreachable (same property-2 failure as JOLTS/ISM Manufacturing,
+DEEP-2026-08-18), no forecast recorded (never-invent-an-estimate rule).
+Added to schedule.json watch_items alongside the JOLTS/ISM Manufacturing
+cluster for a ~Aug 28-29 re-check.
+
+**2026-09-25 18:12Z retro (RETRO-20260925-1812): record the UNSHADED
+bootstrap on countable-metric rows.** The Musk Sep 18-25 weekly settled
+in 200-219; across 8 snapshot rows (one event) own was behind the mid by
++0.123 Brier, almost all from two rows where the raw xtracker_boot output
+was shaded on a short-run slowdown: 431d16dbbd6f (bootstrap 0.50-0.525,
+recorded 0.40, dBrier +0.134) and 4b1aec60bfc7 (aligned 0.273, recorded
+0.30, +0.046). Rows that followed the bootstrap gained. Rule until graded
+on >=3 independent events: est_prob = the bootstrap output (aligned
+windows when n>=20, else all windows); a recency or burst shade is
+written in the note as "shade view: X" and not recorded. Ted Cruz
+edec04d6b96d (rolling-window count, unshaded-ish 0.85 vs 0.545, won,
+−0.185) is consistent. n is tiny; this is a recording discipline, not a
+betting change — the category bar stands.
+
+**2026-09-25 20:15Z retro (RETRO-20260925-2015): same discipline for
+resolver-series band families.** Democratic Senate odds (PMO hourly
+print) Sep 25 bands: the driftless normal on the resolver series
+(60-62 0.49 / 62-64 0.39) would have scored 0.414 over the 3 rows vs mid
+0.470; my blend with an empirical week-drift model (recorded 0.44/0.44)
+scored 0.510 and lost the mid (+0.040 family dBrier). The week drift had
+already reversed (Sep 23 spike, last 12h flat). Rule until graded on >=3
+independent events: record the driftless (random-walk, measured sd)
+model; a drift/momentum view is written as "drift view: X" in the note
+and not recorded. Forecast-only as before.
+
+**2026-09-26 00:1xZ retro (RETRO-20260926-0015): an unexplained
+near-certain LIQUID book beats the xtracker API count.** Trump Truth
+Social Sep 18-25: at 12:13Z the API `cumulative` was 93 with 3h46m left,
+and the live Sep 22-29 tracking later showed only ~1 post in 12-16Z — yet
+the event resolved 100-119. The 80-99 leg sat at 0.003/0.009 on $10.5k
+liquidity; I recorded 0.85 (c5737eab7350, dBrier +0.72) and 0.15 on
+100-119 (512b4f987fa9, +0.70), writing "reason not visible to me" in
+both notes. The market was pricing a resolving "Post Counter" figure the
+API cumulative did not show (backfill / count-definition gap). Rule: on
+a countable-metric row, when a sibling with liquidity >= $1k prices a
+bracket < 0.02 or > 0.98 against my API/bootstrap read and I cannot name
+the reason, record est_prob within 0.10 of that liquid mid and write the
+model read as "api view: X" in the note. A 0.6-ish mid (last week's
+0.93-vs-0.63 win) is disagreement, not certainty — the rule does not
+touch it. n=1 event; recording discipline, category bar unchanged.
+
+## Utterance-market base-rate gate (enacted DEEP-2026-09-12)
+
+A Yes-side BET on a say-the-word / trump-mention / vance-mention /
+earnings-call-mention market requires the rationale to QUOTE a
+frequency base rate from at least TWO comparable prior transcripts of
+the same speaker in the same venue class (e.g., "said X in 4 of the
+last 5 rally speeches", "'Consumable' appears in every one of the last
+4 Chewy earnings calls"), quoted at research time. Thematic reasoning
+("this event will be economically themed, so 'Afford' is likely") does
+NOT qualify. Without the quoted base rate the row stays forecast-only,
+skip_reason `unvalidated-method`. No-side utterance bets and all
+forecasts are unaffected; standard floors unchanged.
+
+Evidence basis (settled rows): the category's only two real-money bets
+both lost on exactly this failure — `e77eef5d06ad` (RNC "Afford",
+−$5.00, thematic-guess rationale) and `2659709d25f9` (Ternus keynote
+"Hardware", −$5.00); the same-event vetoed narrow-phrase forecasts
+16e13abfec2f ("Endorse") and 11ea1286d8c7 ("America First") lost as CF
+trades (−$5.00 each) on the same shape, while the settled winners in
+this family all had the base rate the gate demands — evergreen rally
+vocabulary (MAGA 87736f3e8ab9 +$1.94 CF, Radical Left 36ff9feec021
++$2.58 CF), Vance's own stock lines (906a1a65abc8, 83321f868e0f, both
+won), and Chewy "Consumable" (e7a452fef1be/ffc3fcdcbaa6, won — narrow
+in wording but with a real every-call base rate, which is why the gate
+keys on SOURCED FREQUENCY, not on broad-vs-narrow wording).
+
+Honest caveats, pre-registered review: the four narrow losses span
+only two events (RNC Sep10 supplies three, and RETRO-20260911-0624
+itself flags that the convention's theme may be ONE correlated miss,
+not four independent ones), so this is enacted as a cheap
+sourcing-discipline gate in the spirit of carve-out gate 2, not as a
+claimed category edge. Review after 5 further settled utterance rows
+recorded under the gate: if gated-out rows (thematic-only, forecast
+status) start WINNING at their est more often than losing, loosen or
+drop the gate in a deep retro and say so here.
+
+**Method note (2026-09-15): exact-phrase transcript search undercounts
+disfluent real speech.** Sourcing the base rate for the Trump NC
+"Stock Market" market (Rocky Mount Dec19'25 / Myrtle Beach Aug21'26
+rally transcripts), a literal two-word search for "stock market"
+initially returned 0/2 because one transcript renders the phrase
+interrupted mid-word ("the stock ar-- market is much higher now") —
+a verbatim transcription of a real stutter. A follow-up sweep for the
+constituent words ("stock", "market", "401k") caught it, flipping the
+base rate to 2/2 and matching the market's own high price (0.94),
+which the naive 0/2 read would have contradicted by a large, wrong
+margin. When sourcing a base rate from a verbatim/disfluency-preserving
+transcript (rally speeches especially — official Fed transcripts are
+cleaned and don't show this), sweep constituent words in addition to
+the exact n-gram before concluding a term is absent.
+
+**Method note (2026-09-16): count only the named speaker's lines.**
+These markets resolve on what the SPEAKER says ("if Warsh says the
+listed term"), and press-conference transcripts interleave reporter
+questions. Bet `5886cf8c42b7` (Warsh "Inflation" 20+ Yes @0.78, est
+0.87) cited a 32/40 base rate from the Jun17/Jul29 Fed transcripts.
+Those were whole-transcript counts. Split by speaker label (text
+after `CHAIRMAN WARSH.` up to the next all-caps `NAME NAME.` label),
+Warsh said it 18 and 27 times, so 20+ was met 1 of 2, not 2 of 2. The
+re-check forecast a35693478edb moved the estimate from 0.87 to 0.62
+against a 0.81 mid. For any count threshold, the rationale must state
+that the count is speaker-only and give the per-transcript numbers.
+Threshold markets (N+ times) need the per-event count, never a pooled
+total across events.
+
+**Settlement update (2026-09-16, RETRO-20260916-2211): both this
+event's bets lost, and this is the gate's first tracked evidence.**
+`5886cf8c42b7` settled LOST and `3704ba650a69` (Warsh "Bet"/"Betting"
+Yes @0.61, est 0.70, 2/2 habit base rate shaded to 0.70) also settled
+LOST — Warsh said "bet"/"betting" zero times and "inflation" fewer
+than 20. The Inflation-20+ loss confirms the whole-transcript-vs-
+speaker-only bug above was the entire source of the apparent edge: the
+corrected speaker-only base rate (18/27, threshold cleared 1 of 2) put
+the honest estimate at 0.62, BELOW the 0.78 entry ask — had the count
+been done right at research time, this bet would never have cleared
+`min_edge` and likely would not have been placed at all. Both bets
+satisfied the base-rate-gate's sourcing requirement (quoted >=2-
+transcript frequencies), so this is the gate's first tracked
+post-enactment result: 2 of the "5 further settled utterance rows"
+review checkpoint, 0-for-2. Say-the-word BET category is now 0-for-4
+lifetime (-$20, score.py). n=2 is far too small to tighten or loosen
+the gate (mind-small-n rule) — logged here so the pending review has
+the count, not acted on yet.
+
+**Settlement update (2026-09-17, RETRO-20260917-0211): two gated-out rows
+settle, first genuine blocked-edge win.** Trump Gastonia NC rally Sep16:
+`fbf9bb472258` ("Crime"/"Criminal" 15+, unvalidated-method, est 0.55 vs ask
+0.43 — a ~0.12 edge blocked purely for lacking a quoted per-speech
+frequency, thematic-only reasoning) settled **Yes** — the first
+post-enactment case of a gated-out row that would have been a winning bet
+had the gate not applied. `e606426411cc` ("Communist"/"Communism" 5+,
+unvalidated-method) also settled Yes but is not informative for the gate:
+est 0.65 was already below the 0.775 market, so no edge existed
+independent of the gate. Running tally: n=4 of the pre-registered 5-row
+checkpoint (2 gate-satisfied bets LOST, 2 gated-out forecasts WON — one
+with a real blocked edge, one without). Still one row short and n=4 is too
+small to act (mind-small-n rule); the next settled utterance row completes
+the checkpoint and should force an actual keep/loosen/drop call.
+
+**Checkpoint correction and verdict (2026-09-17, RETRO-20260917-0413): the
+n=4 count above undercounted — `ce38242f9b07` ("Software", Warsh presser,
+unvalidated-method) settled LOST at the exact same timestamp
+(2026-09-16T22:11:54Z) as the Inflation/Bet-Betting bets and should have
+been in the tally from RETRO-20260916-2211 onward; it never got listed
+there. Correct post-enactment count of gate-governed rows (skip_reason
+`bet` or `unvalidated-method`) is n=6, with the 5-row checkpoint actually
+completed at Communist (RETRO-20260917-0211), one retro earlier than
+flagged. **KEEP the gate, verdict as of n=6:** 2 gate-satisfied bets LOST
+(Inflation, Bet/Betting — root cause already diagnosed as a
+whole-transcript-vs-speaker-only counting bug, not a gate design flaw);
+4 gated-out (unvalidated-method) rows split exactly 2 WON (Crime,
+Communist) / 2 LOST (Software, Six Seven) — a wash, not "winning more
+often than losing," so the playbook's own loosen criterion is not met.
+Of those four, only two are actually informative about a blocked YES-side
+edge (the gate only restricts YES bets): Software (est 0.30 vs ask 0.22,
+a real ~0.08 Yes edge blocked, settled No — gate correctly avoided a
+loser) and Crime (real ~0.12 Yes edge blocked, settled Yes — gate cost a
+winner). Communist and Six Seven had no blocked YES edge at all (both
+est below market on the Yes side; Six Seven's only edge was a thin
+at-the-floor No-side edge, which the gate never restricts, so its
+`unvalidated-method` skip_reason is a mislabel — it was declined on the
+separate at-the-floor-noise rule, not the sourcing gate). Net informative
+signal: 1-for-2 correct blocks, from two different events (Warsh presser,
+Trump rally) — not remotely enough to overturn a cheap sourcing-discipline
+gate, and the split outcome gives no directional push either way. No
+change to the gate. Retire this checkpoint; future review needs a fresh
+n and should count only genuinely blocked-YES-edge rows, not every
+unvalidated-method row regardless of which side had the edge.
+
+**Fresh checkpoint, formalized (DEEP-2026-09-17).** Counting starts
+empty as of 2026-09-17. A row counts only if BOTH: (1) skip_reason is
+`unvalidated-method` (or a bet the gate passed), AND (2) the YES side
+had a realizable edge at record time (est > ask, since the gate only
+restricts Yes bets). Current qualifying tally from the retired
+checkpoint's informative pair, carried for reference but NOT counted:
+Software (correct block), Crime (costly block) — 1-for-2. Review fires
+at 5 NEW qualifying rows; the settling retro of the 5th row owes a
+keep/loosen/drop call with counterfactual P&L on the blocked rows, same
+arithmetic as the veto tables. Bet-side context the review must weigh:
+say-the-word bets are 0-for-4 lifetime (−$20, score.py), both
+post-gate losses root-caused to the whole-transcript counting bug the
+speaker-only method note has since fixed — the gate has not yet been
+tested with correct counts.
+
+**First test with correct counts (RETRO-20260924-1729, Xi State Arrival
+Sep 24).** Speaker-only 0/4 base rates held on all three absent-word
+rows ("Trump", Economy, Ballroom: 0 each in the 520-word speech), and
+the No bet `bee5cc45c8df` won (+$1.33; say-the-word bets 1-for-5). The
+miss was the count threshold: "China" 5+ (`ec3c94c891d7`, est 0.62)
+cited "met 3 of 3", but the only same-country analogue (Beijing toast,
+~600 words) sat exactly at 5, and the arrival speech said it 3 times.
+**Rule for N+ count markets:** scale each analogue's speaker-only count
+to the expected speech length (count per word x expected words) before
+comparing with N. When the nearest analogue sits at N or within 1 of it,
+cap the estimate at 0.50 unless a scheduled hook raises the rate.
+
+**Second test (RETRO-20260925-0315, Xi state-dinner toast Sep 24).** All
+10 Yes/No rows resolved No. Both No bets won (`502d92285461` AI +$2.04,
+`674b6cfac193` Million 5+ +$0.68; say-the-word bets 3-for-7). Non-bet
+rows: own Brier 0.063 vs market 0.139 over 8. The capped China 5+ read
+(0.45) kept off the wrong side. **Pre-registered tally: No-side
+speaker-only rows blocked by the 0.10 outside-view boundary.** Current:
+Ballroom +$1.76, Economy +$3.62, SI +$7.82 (3W/0L, 2 events). Review at 5
+settled rows spanning at least 3 independent events; the settling retro
+owes a keep/loosen call with CF P&L. Until then the boundary stands.
+
+**Scope sharpening (DEEP-2026-09-25).** "Independent event" for this
+tally means a distinct speaker-venue-DAY, not a distinct gamma event.
+The Xi arrival (14:00Z) and state-dinner toast (23:55Z) are two gamma
+events but one speaker, one venue class (scripted ceremonial), one
+speechwriting team, one day, so the current tally is 3 rows from ONE
+independent occasion, not two. The review needs rows from at least 3
+distinct days, including at least one non-ceremonial venue (presser,
+rally, interview), before a loosen call. Same count applies to the bet
+side: say-the-word bets are Yes 0W/4L (−$20.00: `2659709d25f9`,
+`e77eef5d06ad`, `5886cf8c42b7`, `3704ba650a69`) vs No 3W/0L (+$4.05:
+`bee5cc45c8df`, `502d92285461`, `674b6cfac193`, one occasion). The No
+wins paid $0.68-2.04 each at 0.71-0.88 asks, so ONE loss erases all
+three: break-even needs a win rate at or above the ask (~0.79), which
+three rows cannot show. Keep sizing flat and keep the event cap. No
+per-side rule change: the Yes losses have a diagnosed cause (thematic
+guesses pre-gate, speaker-only counting bug post-gate), and n is too
+small to call either side an edge.
+
+**Third settlement, first No-side loss (RETRO-20260925-0748).** The
+state-dinner "Ballroom" row (`f0790f007a85`, own 0.15 vs mid 0.315,
+blocked at edge 0.14) resolved Yes. The veto saved $5.00, which is the
+"one loss erases three" case above arriving on the fourth row. Tally
+now: Ballroom-arrival +$1.76, Economy +$3.62, SI +$7.82, Ballroom-dinner
+-$5.00 (3W/1L, +$8.20, still ONE speaker-venue-day). The boundary
+stands. **Rule, topical words:** when the word only became topical after
+some of the analogues (the ballroom build started in 2025, so Macron
+2018, Morrison 2019 and Beijing 2017 could not mention it), count only
+the post-topic analogues for the base rate and state that n. Here that
+was 0/2 (Charles Apr 2026, Beijing May 2026), Laplace 0.25, not the
+0/5 the note implied. The market's 0.315 sat nearer that honest read.
+
+## First bet in 13 days: the AfD Sachsen-Anhalt audit (DEEP-2026-08-24)
+
+The 2026-08-24 03:11Z cycle placed de95e5168de3 ($5 No @0.66, edge 0.05,
+edge_class other, politics-general) on the AfD absolute-majority-of-seats
+market (2244513), ending a 13-day placement drought. Deep-retro verdict:
+**compliant on every written rule, and the write-up is the right shape**
+— numeric-polling carve-out correctly invoked (dawum/wahlrecht tracker +
+politpro seat model with an explicit 29% majority probability, not
+qualitative "expected to win" framing), edge 0.05 clears min_edge 0.04 and
+sits under the 0.10 outside-view boundary, spread 0.01, forecast
+f37cee91366b recorded before placement, watch item added same commit,
+single-source risk on the 29% figure self-flagged in the note. Two things
+the rules did NOT catch, now pre-registered on the watch item rather than
+legislated at n=0:
+
+1. **Horizon.** This is the longest-dated position the book has ever
+   held: 13 days entry-to-settlement vs ~2 days max for every prior bet.
+   Nothing in risk.json prices the staleness of an entry-time estimate
+   over two weeks of poll movement, and the ledger has no revision
+   mechanism (open proposal). Not adding a max-horizon rule on one bet;
+   each deep retro until Sep 6 checks open_mtm drift instead, and the
+   settlement grading must separate "estimate wrong at entry" from
+   "estimate went stale."
+2. **Source-figure adoption.** est_prob was set exactly at politpro's
+   0.29 with no blend toward the market's 0.345. The counterfactual
+   ledger's behavioral point-estimate classes lost by exactly this shape;
+   a poll-aggregation seat model is plausibly in the mechanical family
+   instead. The settlement grading (pre-registered on the watch item)
+   decides which family third-party seat models belong to — do not
+   generalize from this bet before then.
+
+**Settled 2026-09-07 10:06Z (RETRO-20260907-1006): No, WON +$2.58,
+brier_delta -0.0315; the three same-market forecasts (0.71/0.83/0.86 vs
+mids 0.655/0.80/0.795) all beat the mid.** Official result AfD 43.8% and
+39/83 seats (needed 42); Grüne 8.9%, SPD 9.3%, Linke 8.6%, BSW 5.3% all
+cleared 5%, FDP 2.6% did not. Answers to the two pre-registered questions:
+
+1. Horizon: neither wrong-at-entry nor stale. The politpro projection was
+   41 seats at entry and 39 on Sep 2; the final count was 39. Drift over
+   the 13 days was favorable throughout (never near the -0.10 call-out).
+   Still no max-horizon rule at n=1; the MV CDU bracket (`23e40bbbccc5`,
+   13 days) is the next instance.
+2. Family ruling: a third-party poll-aggregation seat model is
+   **mechanical**, not behavioral. Numeric inputs through a deterministic
+   seat-allocation rule, no self-chosen sd. Adopting its 0.29 without
+   blending toward the market's 0.345 was correct: the market moved
+   through the estimate (Yes 0.345 -> 0.185 by Aug 29 -> ~0.005 at
+   settlement). The structural reason it was right: AfD beat every poll
+   (43.8% vs the 38-43% range) and still fell short, because the small
+   parties clearing 5% left only ~6.8% of votes wasted, so a majority
+   needed ~46.6%. A vote-share Gaussian on AfD's own polling would have
+   erred toward Yes; only a threshold-aware seat allocation gets the sign
+   right. Caveats that keep this n=1: single source, a 0.05-edge favorite
+   bet, and the Grüne poll miss (+3.0 pts) shows the model's inputs can be
+   badly wrong even when its structure is right (a symmetric Grüne miss
+   under 5% would have given AfD ~42-43 seats). Validated on structure,
+   not precision. Do not raise the politics-general stake or loosen the
+   category bar on this row.
+
+**Grüne ≥7% bet (`66131e6b8f76`) settled 2026-09-07 16:14Z: Yes, WON
++$40.05, brier_delta −0.1179 (agent beat market).** Est 0.18 vs entry
+0.111; official result 8.9% confirms the same Grüne poll-mean miss
+flagged above (poll mean ~5.9%, actual 8.9%, +3.0pt/~2.5sd under the
+sd=1.2 model) — the bet won on direction only, not calibration: the
+market was priced even further from the eventual outcome (0.111) than
+the already-too-low estimate (0.18). Second data point (after this
+section's own note) that sd=1.2 is too tight for a small party near the
+5% threshold in this election; still n=1 on the bet itself, no risk.json
+change — watch for recurrence on other small-party-near-threshold
+brackets. Full grading in RETRO-20260907-1614.
+
+**Third same-election data point, SPD 7-9% forecast (`1d316aebfe91`)
+settled 2026-09-07 18:12Z, No (no-edge skip, no bet):** est 0.56 vs
+market 0.61, poll mean ~8.1% (sd=1.3), official SPD result 9.3% — again
+above the poll mean, same direction as AfD (43.8% vs 38-43% range) and
+Grüne (8.9% vs 5.9% mean) above. All three parties in this one election
+missed poll-mean-low. Still one correlated election, not independent
+confirmation of a general "DE state-poll dispersion is too tight/biased
+low" prior — no sd change yet, but three-for-three same-direction misses
+in a single election is worth a specific watch: if the next
+small-party/near-threshold DE state election shows the same pattern,
+that is the point to consider a directional (not just wider) dispersion
+adjustment rather than a purely symmetric sd widening.
+
+**Fourth data point, first outside Saxony-Anhalt and first DOWNWARD miss:
+SD >= 20% paired forecasts (`3216cfbf39ef` No 0.63 / `b9ec9f7eba14` Yes
+0.38, both no-edge skips) settled 2026-09-18 05:36Z, No.** Poll mean
+19.62 (five September polls, sd 1.3), official SD share 17.47 (val.se,
+count completed Sep 17): -2.15pt, 1.65 sd. Net Brier vs market on the
+pair +0.010 (flat). Full grading in RETRO-20260918-0537. Two consequences:
+
+1. **Empirical sd, not a hand-picked one.** Four of four vote-share rows
+   at sd 1.2-1.3 missed by >1.5 sd, in both directions across two
+   elections, so the sd is too tight symmetrically; the DE "biased low"
+   reading is still one correlated election. But widening is not free:
+   on a bracket whose boundary sits within ~0.5pt of the poll mean,
+   P(bracket) is ~0.4-0.6 by construction and a wider sd pushes it toward
+   0.5 (here sd 2.0 would have made the losing Yes-frame row worse, 0.38
+   -> 0.42, while improving the still-open 18-20 sibling 0.51 -> 0.37).
+   Pre-registered: once the Sep 20 German rows (MV CDU 11-14 at sd 2.2,
+   Berlin Linke) and the SD 18-20 sibling `b019781165c6` settle, fit the
+   sd that minimises Brier across all settled vote-share Gaussian rows
+   (S-A x3, Sweden x2-3, MV, Berlin) and write that number here as the
+   default, with a separate figure for state and national elections if
+   n allows. Until then keep sd >= 1.8 on any new vote-share bracket
+   research and treat a near-boundary bracket (mean within 0.5pt of the
+   edge) as no-edge unless the CENTER has a sourced shift.
+   (The sd floor is SUPERSEDED 2026-09-21 by the seventh data point
+   below: sd 3.0 state, 2.5 national. The near-boundary rule stands.)
+2. **Sibling ladders inherit the party's center correction.** The
+   SD-second bet (`09fc471ceec1`, same 22:19Z cycle) applied the 2022
+   SD-M gap correction and won +$20; this bracket on the same party left
+   SD at its raw poll mean. Realized: SD down 2.15 and M up ~2, so the
+   correction was right and undersized, and its SD-side half moved this
+   bracket too (mean 18.9 -> P(>= 20) 0.20 vs mid 0.34, a No-side 0.14
+   that the outside-view veto would have caught, so no missed bet). Rule:
+   when an ordinal market (second place, most seats, majority) on an
+   event gets a center correction for party X, every vote-share bracket
+   on party X researched on that event applies the same correction to
+   its mean, in the same commit, and the forecast note says so. One
+   party, one center.
+
+**Fifth data point, and the M-side instance of rule 2: M >= 20%
+(`20eec9b43176`, Yes 0.02 vs mid 0.05, no-edge skip) settled 2026-09-19
+19:24Z, No.** Poll mean 17.36 (sd 1.3), official M share 19.85: +2.49pt,
+1.9 sd, 0.15pt short of the barrier. The row won on the Brier (-0.0021)
+but the process did not earn it: it was recorded in the same 22:19Z cycle
+as the SD-second bet whose whole edge was "final polls understate M", and
+it left M at the raw poll mean. With that bet's own 0.7pt shift, P(>= 20)
+is 0.068 at sd 1.3 and 0.14 at sd 1.8, so the market's 0.05 was the more
+consistent number. A tail call that wins by 0.15pt counts FOR the wider
+sd in the pre-registered fit, never against it: fit on the realized miss
+in sd units, not on the Brier sign. The SD 18-20 sibling `b019781165c6`
+settled the same tick (No, -0.0236, tally only). The fit set is now S-A
+x3, Sweden x3 (SD >= 20, SD 18-20, M >= 20) and waits only for the Sep 20
+German rows. Full grading in RETRO-20260919-1925.
+
+**Sixth data point, first MV-election row and a paired CDU/AfD transfer:
+AfD 32-35% bracket (`53a8e01062fd`, Yes 0.17 vs mid 0.145, no-edge skip,
+declined specifically because the note flagged the eastern-German
+above-poll-mean risk as sd-fragile) settled 2026-09-21, No.** Poll mean
+36.67 (sd 2.2, four Sep10-17 polls), official AfD share 38.2%: +1.53pt,
+0.7 sd — above the poll mean, same direction as the two Sachsen-Anhalt
+rows (AfD, Grüne) and the SPD row above. The no-edge skip was the right
+call: a bet would have lost, and the fragile edge (0.033-0.062 across
+sd=2.0-2.5) was correctly held out under the existing rule. Same
+election, same night: the sibling CDU 11-14% bracket (`23e40bbbccc5`,
+still an open ledger bet, poll mean ~7 sd 2.2) shows an official CDU
+figure of 5.3% per the watch item — -1.7pt, -0.77 sd, the opposite sign
+from AfD's miss and close in magnitude. Read together this is not two
+independent misses but one transfer: CDU voters moving to AfD late
+enough that neither party's final-week poll mean fully captured it — the
+same shape as the Sweden SD-M pairing (rule 2 above), now seen in a
+second country/party pair. Generalising rule 2: a same-election transfer
+between an established and an insurgent party on the same side of the
+spectrum is not Sweden-specific; when researching a vote-share bracket
+for either party in a state/national election with a rising insurgent
+neighbour, check the neighbour's poll trend and expect the pair to miss
+in offsetting directions, not treat each bracket's poll mean as
+independent. The fit set is now S-A x3, Sweden x3, MV AfD x1, and still
+waits on MV CDU (ledger bet, UMA lag as usual for this class) and Berlin
+Linke (already settled, RETRO-20260921-1520) before the pre-registered sd
+fit runs. Full grading in RETRO-20260921-1614.
+
+**Seventh data point, the fit itself, and the German-set joint verdict: MV
+CDU 11-14% bet (`23e40bbbccc5`, $5 Yes @0.09, own 0.1701 at mean 9.0 sd
+2.2) settled 2026-09-21 16:15Z, No, LOST -$5.00, brier_delta +0.0208.**
+Official CDU share 5.3%: -3.7pt from the entry mean (1.7 sd), -1.7pt from
+the final-week poll mean of 7. With Berlin Linke-most No (`7ec71e307f12`,
+-$5.00) the German set nets -$10.00, both legs lost. Full grading in
+RETRO-20260921-1625; fit script `work/sdfit_0921.py`. Rulings, which
+REPLACE the interim "sd >= 1.8" line in rule 1 above:
+
+1. **Default sd: 3.0 points for a state or regional election, 2.5 for a
+   national one.** The pre-registered Brier-minimising fit is degenerate
+   on this set (Brier falls monotonically with sd, 0.347 at 1.2 to 0.162
+   at 5.0, because five of seven draws landed in a tail bracket), so the
+   number comes from the estimator this section already prescribed, the
+   realized miss: RMS of official share minus model mean, one draw per
+   party-election, is 2.9pt over all seven (S-A SPD +1.2, S-A Grüne +3.0,
+   SD -2.15, M +2.49, MV CDU -3.7, MV AfD +1.53, Berlin Linke +4.7), 3.1
+   for the five German state draws, 2.3 for the two Swedish ones (n=2, a
+   floor and not a fit). Sensitivity 2.6-3.0. Every sd used so far (1.2 to
+   2.5) sat under it. Points, not a fraction of the share: Grüne missed by
+   3.0 from a 5.9 mean. Mean miss +1.0 with a standard error near 1.1, so
+   NO directional "polls read low" shift. Open vote-share rows join the
+   set as they settle; refit at n >= 12 draws.
+2. **The centre stress test is the robustness check; an sd sweep is not.**
+   This bet's rationale called its edge "robust across sd 2.0-2.5". A
+   bracket that does not contain the mean gains probability from any
+   widening, so an sd sweep can never reject it (at sd 3.0 this losing bet
+   reads 0.20, a BIGGER edge). Before any vote-share bracket bet, recompute
+   with the mean at the most recent poll, then one further point along the
+   poll trend. The edge must stay >= min_edge at both. Here: mean 8.0 ->
+   0.083 at sd 2.2, under the 0.09 ask; mean 7.0 at sd 3.0 -> 0.081. No
+   bet either way. Write both numbers in the rationale.
+3. **No bet against the trend.** No Yes bet on a bracket, and no bet on an
+   ordinal leg (most seats, second place), that needs the party to reverse
+   its trailing poll trend, unless a sourced event explains the reversal.
+   A poll mean is a lagging average of a moving series. Evidence: both
+   German-set legs sat opposite the late trend (CDU down a year from 13 to
+   8, I bought the bracket above my centre; Linke rising, I held No), and
+   in both states every party with a trend beat its final polls in the
+   trend direction (Linke +4.7, AfD +1.5, CDU -1.7 from the final-week
+   mean). This is the single-party form of rule 2's transfer reading.
+
+**Eighth and ninth data points, the first out-of-sample test of the sd
+default: MV Linke 8-11% (`3b51b45cfd43`, own Yes 0.64 vs mid 0.655,
+market-agrees) and Berlin SPD under 10% (three rows, last one
+`06c6be0cad66`, own 0.26 vs mid 0.2205) settled 2026-09-21 17:2xZ, all
+No.** Official MV Linke share 6.5% against a six-poll mean of 10.17:
+-3.67pt. Official Berlin SPD share 12.1% against a final mean of 11.6:
++0.5pt. Full grading in RETRO-20260921-1730. Rulings:
+
+1. **The default held.** With the two new draws (and MV CDU corrected to
+   the official 4.9%, a -4.1pt miss, not the 5.3% the watch item carried)
+   the RMS realized miss is 2.9pt over nine draws and 3.1 over the seven
+   German state draws. It was 2.9 and 3.1 before. Keep sd 3.0 state, 2.5
+   national. Refit still at n >= 12.
+2. **The spread between polls is never the sd.** The Linke note set sd
+   1.4 "matched to observed dispersion" and called the wider sd a
+   "spurious" edge. Six polls that agree with each other measure house
+   agreement. They say nothing about the distance from the poll mean to
+   the result. At the default sd 3.0 the same mean gives P(8-11) = 0.37,
+   Brier 0.14 against the market's 0.43 and my 0.41. A vote-share note
+   that uses an sd under the default must cite settled rows that justify
+   it. Poll agreement does not.
+3. **Consolidation squeezes the small parties on the leader's side
+   (keep counting, n=2 elections, not a bet rule yet).** MV 2026: the
+   premier's SPD beat its polls by about 4 (derived from the polled
+   5-point AfD lead closing to 2.7) while Linke (-3.7) and CDU (-4.1
+   from the entry mean) under-ran theirs. Brandenburg 2024 had the same
+   shape. When a state race is a two-party fight for first place
+   against AfD, run the centre stress test on every small-party bracket
+   with the mean moved 2 points DOWN, whatever that party's own trend
+   says. This does not contradict the "shaded away from the poll leader"
+   count above: that count is about who finishes first, this one is
+   about the shares of the parties that cannot.
+
+## Funnel pool_total: prose rule escalated to a mechanical check
+(DEEP-2026-08-24)
+
+The mandatory `pool_by_query`/`pool_total` funnel-line rule
+(DEEP-2026-08-18) was violated twice in the two days after
+DEEP-2026-08-23 flagged the first omission as a compliance reminder:
+2026-08-23 00:11Z and 2026-08-24 03:11Z (the bet cycle) both omitted
+`pool_total`. Same escalation as the coverage weld that created
+reconcile.py: the check is now mechanical — reconcile.py check 3 fails
+any trailing-24h funnel line missing either field. The 03:11Z line was
+backfilled with pool_total 978 (the cycle log's own "Scan 4/4 queries ->
+978 candidates" figure, which equals the pool_by_query sum exactly); the
+00:11Z 2026-08-23 line stays as ruled yesterday (outside the check's
+window, pool_by_query present, reconciliation held).
+
+## Exploration budget, daily-high-temperature brackets, first test (2026-08-25 22:xxZ)
+
+New category, surfaced by the screener (Beijing/Amsterdam/Kuala Lumpur/Jeddah
+26 Aug daily-high-temperature brackets, divergence 0.02-0.065). Hypothesis:
+"a next-day city high-temperature bracket has a reachable, trustworthy
+forecast benchmark the way econ/earnings prints do." NOAA/weather.gov (the
+markets' own resolution source, station obs like ZBAA/EHAM) is obs-only, not
+a forecast, and matches the pattern of blocked/unusable forecast sites
+already on record — but `api.open-meteo.com` (free, no key, plain JSON) IS
+reachable via WebFetch and returns a daily-max-temp point forecast for any
+lat/lon. **Result: reachable for the point forecast.** Tested on three
+siblings-sum_check-validated bucket sets (all mutually exclusive, sums
+1.01-1.06, all well-formed):
+
+- Beijing (mean 25.0C, airport coords): bucket model N(25.0, 1.2) gives
+  P(26C)=0.228 vs live market 0.22 — matches almost exactly.
+- Amsterdam (mean 26.7C, Schiphol coords): N(26.7, 1.2) gives P(25C)=0.125
+  vs live market 0.44 — a 0.32 raw-price gap.
+- Kuala Lumpur (two open-meteo models disagree with each other: default
+  30.9C vs ECMWF 30.4C): N(30.65, 1.2) gives P(30C)~0.28 vs live market
+  0.073 — a 0.19 gap, same direction (market warmer than my model).
+
+**Not yet ruled reachable for a trustworthy edge.** Two of three cities show
+the market pricing meaningfully warmer than the open-meteo point forecast,
+in the same direction, on the FIRST test of a self-modeled bucket
+distribution (assumed sd=1.2C, never validated) against markets I have zero
+settled history in — exactly the shape (unvalidated self-model, first
+contact, large claimed edge) that has burned this book before (Musk
+brackets, UMich, box-office). Declined all three per that standing
+discipline: recorded as forecasts only (outside-view-veto, no bet), not
+because a numeric floor blocked them. Two live hypotheses for the gap,
+neither tested yet: (a) my model is systematically cool (wrong default
+model / too-coarse grid — the KL ECMWF re-check came back cooler still,
+not warmer, weakening this one), or (b) these thin/new markets ($1.9-2.3k
+liquidity) are simply not efficiently priced yet and the gap is real. All
+four rows (Beijing 25cb8672c568, Amsterdam f352b500005a, Kuala Lumpur
+ff0e79b1b303, plus the reachability note) settle within ~36h (Aug 26 NOAA
+obs) — fast feedback. **Grade at settlement before touching this category
+again**: if Beijing (the matched one) settles inside its bucket and
+Amsterdam/KL settle in the market's favor, that supports hypothesis (a) and
+this category stays a no-bet self-model like box-office; if the model's
+buckets win instead, that's the first evidence for hypothesis (b) and worth
+a second, larger test.
+
+**Settlement (2026-08-26 17:12Z): Beijing and Kuala Lumpur graded, both the
+26C/30C buckets LOST — neither settlement is itself surprising (both
+buckets were minority outcomes under my own model), but the KL row is the
+useful signal.** KL's market (0.073) and my model (0.26-0.28) disagreed by
+0.19 in the same direction as Amsterdam (market pricing warmer); the actual
+high was not 30C, consistent with the market's warmer read being closer to
+correct. That is one data point for hypothesis (a) — my open-meteo point
+forecast + N(mean,1.2) bucket reads systematically cool, not that these
+thin books are mispriced — and zero evidence yet for hypothesis (b).
+Beijing (already matched, no realizable edge — see counterfactual ledger
+exclusion above) losing its 23% bucket is uninformative either way. n=1
+directional read, not a category verdict: Amsterdam (also market-warmer)
+and the Spider-Man BND sibling are still open and settle within the same
+window. **Category stays no-bet until Amsterdam confirms or breaks the
+direction; do not extend this category (new cities, real stakes) before
+then.** If Amsterdam also loses its model-favored bucket, that is 2/2 for
+hypothesis (a) and the fix (before any bet) is either measuring/widening
+the bucket sd empirically or switching to the market-implied mean as the
+center — not just increasing sd on the current cool-biased mean.
+
+**Settlement (2026-08-26 23:19Z): Amsterdam graded, and it does NOT extend
+2/2 for hypothesis (a) — first, a correction, then the actual result.**
+Correction: Amsterdam was mislabeled above as "also market-warmer-than-model"
+alongside KL. Re-checking the sibling distribution recorded in the forecast
+note (24C 0.125, 25C 0.44 mode, 26C 0.335, 27C 0.075), the market's mode is
+25C — *below* the model's 26.7C mean, the mirror image of KL (market mode
+~32C, *above* the model's 30.65C mean). Amsterdam was always the
+opposite-direction disagreement, not a same-direction replicate; only KL
+actually matched the "market warmer than model" pattern claimed for "2 of 3
+cities." Result: the market's confident 25C mode (44%) **lost** — the
+model's lower read (12.5%, implying a bucket nearer its warmer 26.7C mean)
+was directionally right. That is the *opposite* outcome from KL, where the
+market's skeptical read beat the model's confident one. Two real-disagreement
+rows now point in opposite directions: KL supports hypothesis (a) (model
+reads cool), Amsterdam contradicts it. **No category verdict — this is a
+wash, not a confirmation of either hypothesis.** Counterfactual ledger: No
+side, edge +0.31, won, CF P&L +0.79u (see table above; weather-Gaussian
+generation class now 1W/1L, −0.21u net, not a clean loss streak). Category
+stays no-bet. Given contradictory n=2 and an unvalidated, never-measured
+sd=1.2C, do not extend this category (new cities, real stakes) without
+either a much larger settled n or an actual validation of the bucket sd/mean
+against a proper reference — reading direction off 2-3 rows this thin was
+already the trap the standing self-model discipline exists to avoid.
+
+## New hypothesis: Poisson-fit devig-derivative pricing for soccer totals/spreads (2026-08-28 02:12Z)
+
+Sibling-check on the Man City/Crystal Palace event (33 markets, gamma events
+API) found the O/U and spread ladders internally monotonic with no arithmetic
+violation — cross-market consistency alone gave no edge on this event. Tried
+a second-order method instead: fit an independent-Poisson scoreline model
+(two lambdas, grid search) to the power-devigged 1X2 (the-odds-api EPL/
+Ligue1/Bundesliga h2h), then price the derivative O/U and spread markets off
+the fitted lambdas rather than devigging them directly (no derivative odds
+available in the free odds-api feed — h2h only). This is genuinely new
+arithmetic ("the market hasn't done this specific derivation"), consistent
+with the fact-finality thesis, but the independent-goals assumption is a
+known real simplification (ignores home/away goal correlation; real matches
+run slightly negative), and the fit is a coarse 0.02-step grid search, not a
+closed-form solve.
+
+Three legs tested this cycle:
+- Man City -1.5 spread: model 0.332 vs mid 0.325 (diff 0.007) — no edge.
+- PSG -1.5 spread: model 0.312 vs mid 0.315 (diff 0.003) — no edge.
+- Crystal Palace/Man City halftime draw (half-match lambdas via a 45%-of-
+  full-match heuristic): model 0.405 vs mid 0.38 (diff 0.025) — no edge.
+- Lille/PSG O/U3.5: model Under=0.736 vs mid Under=0.655 — edge 0.081.
+- Bayern/Stuttgart O/U4.5: model Over=0.556 vs mid Over=0.48 — edge 0.076.
+
+The spread/halftime legs came back essentially at-market (the method
+reproduces PM's own pricing when there's nothing to find, a mild point in
+its favor). The two totals legs cleared min_edge (0.04) and would clear
+min_edge_book_devig (0.07) — but declined to bet either: this is a first
+contact with an unvalidated method, no settled track record, and the
+standing lesson from every other self-modeled-without-mechanical-benchmark
+class (weather-Gaussian, WTI/other, the outside-view veto ledger at 8W/15L
+net -8.42u) is that a maiden voyage on real capital is how this book keeps
+losing money. Recorded both as forecasts only (`unvalidated-method` skip
+reason, ids b3a14f1733a3 and de3f3a9c2685) to build a graded track record
+first. Both matches kick off 2026-08-28 ~18:30-19:00Z and should settle
+within a day — **grade at settlement**: if the model's totals calls land
+closer to the outcome than the market's mid did (dBrier favorable on both
+or on net), that's the evidence needed to consider betting the next instance
+of this method; if it loses like every other maiden self-model, fold it into
+the same standing discipline as weather-Gaussian without a second thought.
+
+**GRADED 2026-08-28 21:30Z (RETRO-20260828-2130): bar NOT met, stays
+forecast-only.** Both totals legs settled Over. Lille/PSG O/U3.5: model
+Under-lean was wrong, dBrier +0.113. Bayern/Stuttgart O/U4.5: model
+Over-lean was right, dBrier -0.111. Net +0.002 — a wash, not the
+"favorable on both or on net" the pre-registration required, so no bets;
+but unlike weather-Gaussian's maiden voyage the method matched the market
+rather than underperforming it, and its three at-market legs reproduced PM
+pricing within 0.01-0.03. Treat as market-level accuracy with no proven
+edge. Continue `unvalidated-method` forecasts on instances where the model
+diverges >= 0.04 from mid; re-grade at n>=6 **independent matches** settled
+before considering a bet (see the 2026-09-05 correction below — legs, not
+matches, do not count separately). Tally direction-of-miss per instance
+(model-high vs model-low vs hit) to catch the known independent-Poisson
+bias (ignoring goal correlation tends to thin the tails): current tally —
+Lille/PSG model-LOW (actual total exceeded model lean), Bayern/Stuttgart
+HIT (leaned Over, Over hit).
+
+**GRADED 2026-09-05 18:14Z (RETRO-20260905-1814): third match, bar still
+NOT met — and the threshold's unit was wrong.** Nottingham Forest/
+Tottenham (2026-09-05) settled all five derivative legs the model was
+recorded on (O/U 1.5/2.5/3.5/4.5, BTTS), all `unvalidated-method`, in an
+extremely low-scoring match (Under won even at the 1.5 line). Every leg
+beat the market's Brier score (dBrier -0.129/-0.095/-0.052/-0.015/-0.109,
+avg -0.080) because one fitted scoreline model and one realized outcome
+mechanically make every derivative leg of the same match agree in
+direction. That is 5 correlated observations, not 5 independent ones —
+naively summing them with the two 2026-08-28 legs gives a tempting n=7
+total (avg dBrier -0.057, "favorable on net"), but that number is an
+artifact of counting legs instead of matches, and would let one lucky
+match trigger a real-money bet on an effective sample of 3. **The
+re-grade unit is hereby corrected to independent matches, not settled
+legs**: a multi-leg sweep on one match counts as one match toward n>=6,
+using its average leg dBrier as that match's data point. Running tally by
+match: Lille/PSG (1 leg, dBrier +0.113, unfavorable, model-LOW/wrong),
+Bayern/Stuttgart (1 leg, dBrier -0.111, favorable, model-HIGH/right),
+Forest/Spurs (5 legs, avg dBrier -0.080, favorable, model-LOW/right on
+every rung) — **n=3 independent matches, 2 favorable, net favorable**,
+still short of the n>=6 bar. Still forecast-only; no bet. Pattern worth
+watching, not yet actionable: both favorable matches were extreme-scoring
+games (one high, one very low) where the market's correlation-pricing and
+the model's independent-goals simplification diverge most; the one
+unfavorable match (Lille/PSG) was a closer game. If that holds as more
+matches settle, the method may end up selectively useful on
+extreme-divergence instances rather than uniformly — which the existing
+>= 0.04-divergence recording filter already partially selects for.
+
+## New hypothesis: Normal-fit cross-line extrapolation for MLB totals (2026-09-15 02:4xZ)
+
+TRIGGERED cycle on two new PM markets, SD@COL (Coors Field) O/U 12.5
+(4573201) and O/U 10.5 (4573200), both created ~10min before the watch
+trigger, ~22h before first pitch. `core/odds.py odds baseball_mlb --markets
+totals` returned 6 sportsbook lines clustered at 14.5/15.0/15.5 — a full run
+higher than either PM line, and itself spread across a full run
+(14.5-15.5), consistent with early/soft pricing before starters are
+confirmed. Power-devigged each book (`strategy/tools/devig.py`), averaged
+by line (14.5: 0.518, 15.0: 0.488, 15.5: 0.428), fit a Normal(mu,sigma) to
+the 14.5/15.5 points (mu=14.70, sigma=4.39 — checked against the 15.0 point:
+predicted 0.473 vs observed 0.488, close enough to trust the shape), then
+extrapolated down to PM's lines: 12.5 → model P(Over)=0.692 vs ask 0.43
+(claimed edge 0.26); 10.5 → model P(Over)=0.831 vs ask 0.59 (claimed edge
+0.24).
+
+This is a first-contact method for MLB (no prior cross-line total
+extrapolation attempted in this book — the closest precedent is the soccer
+Poisson-derivative section above, which fits a scoreline model to devigged
+h2h rather than fitting a distribution directly to devigged totals at
+multiple lines). Both claimed edges are far past the 0.10 outside-view-veto
+boundary with no fact-final or mechanical-benchmark anchor (a self-built
+Normal fit is exactly the self-model class the veto exists to catch, not a
+carve-out candidate), and the 2-3 run gap being extrapolated (down from a
+14.5-15.5 cluster to 10.5/12.5) is a wide reach for an assumed-Gaussian
+shape when the true total-runs distribution is right-skewed and discrete.
+Declining to bet either leg — recorded as `unvalidated-method` forecasts
+only (5b6a0e52dd62 for 12.5-Over, 793b7298aec9 for 10.5-Over), per the same
+maiden-voyage discipline as the soccer hypothesis (forecast-only until an
+independent-instance bar is met). Both settle within ~22h;
+**grade at settlement** and decide whether a second instance is worth
+seeking out, or whether one high-divergence pre-lineup game is enough
+evidence that early lines are too soft to extrapolate confidently.
+
+**Bar pre-registered by DEEP-2026-09-15** (mirroring the soccer
+Poisson-derivative bar and its 2026-09-05 leg-counting correction,
+which this hypothesis cited but left unset): forecast-only until
+**n>=6 independent GAMES** settle with recorded cross-line forecasts;
+multiple lines on the same game (here 12.5 and 10.5 on SD@COL) count
+as ONE game, graded by average leg dBrier — one fitted Normal and one
+realized run total make every line of the same game agree in
+direction, exactly the correlated-legs artifact the soccer correction
+documented. Tally direction-of-miss per game (model-high/model-low/hit)
+to catch the known skew risk: the true total-runs distribution is
+right-skewed and discrete, so a symmetric Normal fitted at 14.5-15.5
+and read at 10.5-12.5 likely OVERSTATES P(Over) at lines far below the
+mean — if the tally shows persistent model-high misses on the low
+side, that is the fitted-shape bias showing, not noise. Also record
+the book-line context per instance (cluster width, hours to first
+pitch, starters confirmed or not): the alternative reading of any
+early win is "early book lines are soft," which is a timing edge, not
+a distribution-fit edge, and only the context column can separate
+them.
+
+**GRADED 2026-09-16 04:1xZ (RETRO-20260916-0411): game 1/6, bar still NOT
+met.** SD@COL settled: total runs landed at 11 or 12 (12.5-Over lost,
+10.5-Over won). Model-high miss confirmed on the 12.5 leg exactly where
+the pre-registered right-skew concern predicted it (est 0.69, market mid
+0.42, actual Under: model brier 0.4761 vs market brier 0.1764, dBrier
+model-mkt +0.2997 — market clearly better). The 10.5 leg hit (est 0.83,
+market mid 0.58, actual Over: model brier 0.0289 vs market brier 0.1764,
+dBrier model-mkt −0.1475 — model better, but 10.5 was already a soft bar
+given the actual total, so a hit there isn't strong confirmation of the
+fitted shape). Average leg dBrier (model−mkt) for this game: **+0.0761**
+(model underperformed the market on net). Direction-of-miss tally:
+model-high ×1 (12.5 leg — real total came in ~2.7-3.7 runs below the
+fitted mean of 14.70, squarely the "symmetric Normal overstates P(Over)
+read far below the mean" failure mode the bar was written to catch),
+hit ×1 (10.5 leg, weak evidence per above). Book-line context: 6-book
+cluster at 14.5-15.5 (~1-run spread), ~22h pre-game, starters likely
+unconfirmed at forecast time — consistent with "early lines still
+soft/wide" rather than a confirmed distribution-fit edge either way.
+No bets were placed (unvalidated-method correctly kept this
+forecast-only — $0 P&L impact from a leg that would have lost real
+stake). Still forecast-only; **5 more independent games** needed before
+the n>=6 bar is reached. No playbook policy change yet — one game is not
+a sample, but the single data point points toward the right-skew
+overstatement risk being real rather than illustrative.
+
+## Mech second opinions: request sequencing and what the pair showed (2026-09-07 08:0xZ)
+
+Two settled instances now show the same off-chain failure shape:
+2026-09-04 03:50Z (a v4 request sent concurrently with a market-aware
+request to the SAME mech, service 25) and 2026-09-07 07:58Z (a v4 request
+to service 44 sent concurrently with a market-aware request to a
+DIFFERENT mech, service 21). Both were rejected `HTTP 401 wire nonce
+below sender's next expected slot`, and both delivered on a sequential
+retry with a new `request_id`. The nonce is on the SENDER (the service
+safe), not on the mech, so the CYCLE.md 5a rotation across mechs does not
+make requests independent. Rule: send off-chain mech requests strictly one
+at a time, waiting for each delivery before the next; never batch them in
+one tool-call block. A rejected request is still logged with
+`mechlog.py record --error` (both instances are), and the retry keeps the
+paired-comparison count honest (one candidate, two tools, sequential).
+
+First blind paired comparison on an interpretive news question
+(Russia-Ukraine in-person meeting by Sep 15, market 3741669, mid 0.185):
+market-aware 0.06 (research_class R, researchability 0.85) vs v4 0.28 vs
+own 0.18. The two tools straddle both me and the market by 0.22 on the
+same prompt and the same serper results, which is a wider spread than any
+econ pair so far (BoR hold: market-aware 0.68 vs own 0.75 vs mid 0.685).
+Nothing to act on yet; grade both against the Sep 15 outcome and keep
+noting whether the market-aware/v4 gap is systematically larger on
+interpretive (news) questions than on mechanical prints.
+
+**Sequential sends are not enough (2026-09-07 11:2xZ, FULL cycle,
+operator machine).** Third and fourth nonce instances, this time with
+requests sent strictly one at a time: the first off-chain request of the
+cycle (service 25, market-aware, FOMC hike) was rejected with `on-chain
+mapNonces read failed (HTTP 503)`; the retry with a new `request_id`
+delivered; the NEXT request on the same mech (v4, the paired comparison)
+was then rejected twice in a row with `wire nonce below sender's next
+expected slot (HTTP 401)`, and `legacy_on_chain=true` delivered at the
+first attempt (tx 0x1bf161fc..., ~0.13 POL). Later off-chain requests to
+services 21 and 44 delivered normally, so the slot desync was scoped to
+the mech that had just served a request after the 503, not to the whole
+cycle. Rule amendment: after ONE nonce (401) rejection on a sequential
+send, go straight to `legacy_on_chain=true` for that request; a second
+off-chain retry has now failed 1/1 and costs a minute. Keep the first
+retry-with-new-id for the 503 shape, which is what actually recovered.
+
+**Second market-aware price-leak instance, and it is the mechanical
+kind.** On the FOMC hike question (market 2252245, mid 0.485, FedWatch
+~0.56 on Sep 4, Kalshi 0.505) the tool's serper query is the market
+question itself, which pulled `polymarket.com/event/fed-decision-in-
+september` reading "25 bps decrease at 100%" (an older event, already
+resolved) plus the July FOMC minutes; it delivered p_yes 0.02 with
+`market_prob_seen` null and confidence 0.95, while v4 on the same
+sources gave 0.22. First instance was the NFP jobs event
+(RETRO-20260904). On Polymarket-titled scheduled decisions the
+"blind" estimate is not blind, it is anchored on whatever Polymarket
+page Google ranks, which can be a stale sibling event. Until the tool
+filters polymarket.com out of its sources, treat market-aware outputs on
+questions whose wording matches a Polymarket title as contaminated in
+retros (compare v4 and the market instead), and say so in the cycle
+summary each time it recurs. The CPI bracket request (service 21)
+showed the opposite failure: `research_class NR-numeric`, researchability
+0.10, p_yes 0.12 on the 0.4% bucket, having missed the Cleveland Fed
+nowcast (0.36) that is exactly the reachable benchmark for that shape.
+
+**Cleveland Fed nowcast is reachable from the operator runner
+(2026-09-07 11:1xZ).** `clevelandfed.org/indicators-and-data/inflation-
+nowcasting` fetched cleanly (updated 09/04: Aug CPI MoM 0.36, core MoM
+0.20, YoY 3.38, core YoY 2.38) after every cloud attempt in August was
+EGRESS_BLOCKED. That supplies a quoted MEAN for the whole CPI cluster,
+and it centred where both PM and Kalshi already sat, so the only
+disagreement is dispersion (PM/Kalshi imply sd ~0.07 on the headline
+MoM bucket; my model used 0.11). The sd is still unsourced at research
+time: the Knotek-Zaman RMSE tables live in PDFs (wp2406 unreadable via
+WebFetch, EC 2023-06 PDF 404, the HTML commentary reports only
+quarterly SAAR comparisons), so the 0.4% No leg (claimed edge 0.14 at
+ask 0.52) stayed an outside-view-veto row (5a6d5321c25a) under gate 2,
+as did the core 0.2% No leg (79e72c3002c3). A cloud or operator cycle
+that extracts a published monthly-RMSE figure for the headline nowcast
+before the Sep 11 print turns this into the carve-out's first live
+candidate; without it the rows grade the market's tighter sd against my
+wider one for free (UR 609c98073a77 said tighter, NFP 84167af841f7 said
+wider, n=2).
+
+**Third market-aware contamination shape: the stale-year trap, now
+inside the tool (2026-09-07 15:0xZ, FULL cycle, operator machine;
+`journal/mech-requests.jsonl` rows phil-20260907-1512-ppi-ma-21 and
+the four Liberals rows).** On "Will PPI YoY be 5.1% or more in August?"
+(market 3566688, mid 0.705; own 0.67 from the FRED-level base-effect
+chain with consensus MoM +0.4) service 21's market-aware delivered
+p_yes 0.07, confidence 0.85, `research_class R`, researchability 0.95,
+`parse_tier clause`. Its serper background led with a 10 Sep 2025
+LinkedIn post ("PPI edged down -0.1% in August ... 2.6% year-over-year")
+and a Jul 2025 post, and the tool priced August 2026 off them although the
+same background carried the BLS July 2026 release (4.7%). That is the
+playbook's search-result stale-year trap (four instances on the
+unemployment-rate item) reproduced by the mech's own retrieval, and it is
+a different failure from the two already recorded (Polymarket-page price
+leak; NR-numeric miss of a reachable benchmark). Retro rule: when a
+market-aware `p_yes` sits far from both me and the market on a scheduled
+print, read `source_content.serper_response.organic[].date` before
+crediting it - a same-month prior-year date in the top results explains
+the number and the delivery is graded as contaminated, not as a
+disagreement. Same-cycle pair evidence on an interpretive question (Sweden
+Liberals win seats, 3561916, mid 0.575, own 0.55): market-aware 0.62 with
+page content (it read the Novus 4.3 poll, and the Polymarket event page's
+"trader consensus 57.5%" leaked in again), v4 0.22 on snippets alone (a
+Reuters snippet "captured only 3 percent"), pair spread 0.40 - the widest
+yet, wider than the Russia-Ukraine 0.22 above. The gap is retrieval depth,
+not judgment: grade both against Sep 13. Operational: service 25 was down
+for off-chain both tries (`eip1271 isValidSignature call timed out`,
+`mapNonces read failed`, both 503) and its `legacy_on_chain` delivery
+returned the literal `Invalid response` (paid, no JSON) - a third
+delivery outcome to log as an error; and a second parallel off-chain send
+(two requests to service 44 in one tool block) reproduced the 401 nonce
+rejection exactly as the rule above predicts, so the sequential-send rule
+stands on 3/3 instances.
+
+**Supplied facts steer both tools to near-certainty (2026-09-09 00:1xZ,
+FULL cycle, operator machine; `journal/mech-requests.jsonl` rows
+phil-20260909-0010-iran-ma-44 and phil-20260909-0012-iran-v4-44).** On the
+Iran Sep 7 ceasefire leg (market 4168072, Yes mid 0.35, own No 0.55) the
+prompt included the resolution clause AND the fact that CENTCOM struck
+tankers at the Kharg and Jask anchorages on Sep 5 and Sep 8. Service 44
+market-aware returned p_yes 0.03 (R, researchability 0.95, confidence
+0.95) and v4 on the same mech, same prompt, returned p_yes 0.003
+(confidence 0.99) - both sequential, both delivered off-chain first try, no
+nonce error. Neither output engaged the one open question (does an
+anchorage strike count as 'internal waters' or as excluded 'maritime
+territory'); both read the supplied fact as decisive. Two lessons for
+reading mech deliveries: (1) when the prompt hands the tool a fact, the
+tool's confidence is largely MY fact echoed back, so a paired comparison
+on such a prompt measures prompt-following, not research - for interpretive
+clause questions, send the clause and the question only, and compare
+against a second request that adds the facts; (2) the market-aware
+delivery's top serper hit was again the Polymarket event page (a 5-day-old
+snippet reading '71%'), the fourth price-leak instance, and this time the
+leaked number was STALE and on the opposite side of the current price, so
+'contaminated' does not even mean 'anchored on the live market'. Grade
+both deliveries against the Sep 7 leg's settlement alongside the position
+itself (schedule.json watch item, grading item 5).
+
+**Mech prompt front-loading (2026-09-21 20:5xZ, seven R1-window requests).**
+The tools build their Serper query from the first ~140-150 characters of
+my prompt and show the model only the top 5 organic results. Evidence:
+`phil-20260921-2100-opus22b-r1ma-s21` and its blind twin searched "Will
+Anthropic make its next Claude Opus model (... Claude Opus 5.5) available
+to" - the date fell off the end, and the results were the Opus 5 and 4.5
+launch posts; `phil-20260921-2056-musk200-r1ma-s25` lost the week the same
+way and got other weeks' event pages. Rule: the first 140 characters of a
+mech prompt carry the distinguishing noun AND the date (or the live
+quantity's name), e.g. "Claude Opus 5.5 release on September 22, 2026:
+will Anthropic ...". Still one `?` sentence, still no price. Second
+finding, for grading: retrieval is not repeatable between calls. On the
+BTC 90k trio (service 44) the same query 50 seconds apart put the live
+Binance price at rank 8 for the R1 pair (outside the top-5 cut, p 0.30 and
+0.10) and at ranks 4-5 for the GPT-4.1 baseline (p 0.565). A baseline row
+is only a model comparison when `serper_response.organic` top 5 match;
+check that before quoting an R1-vs-GPT gap in a retro.
+
+## Watch-item hygiene: schedule.json is a pacing instrument, not a journal (DEEP-2026-09-14)
+
+schedule.json is read by every tick to decide pacing; by 2026-09-14 it
+had grown to 87KB (watch_items 75KB), with the Iran item at 31.6KB
+carrying 30 near-identical "finding UNCHANGED" paragraphs and the
+Andersson item at 14.2KB. That growth pattern is not free: an 87KB file
+cannot be printed whole without the tool-output spill that destroyed the
+2026-08-28 deep-retro session (output over the harness cap lands in a
+permission-gated spill file nobody can approve), and every cycle commit
+rewrites the whole blob. The history was also redundant — every one of
+those checkpoints already existed in cycles.log, funnel.jsonl, and git.
+
+Rules, effective now:
+
+1. **Checkpoints update IN PLACE.** A re-check that changes nothing
+   updates the item's status line (count + latest timestamp, e.g. "30
+   consecutive UNCHANGED checks through 2026-09-13 20:1xZ"), it does
+   not append a paragraph. A re-check that DOES change the picture
+   replaces the stale part of the item and cites the forecast id it
+   recorded — the forecast/funnel/retro record is the durable history,
+   the watch item is the current state.
+2. **~2,000-character soft cap per item.** An item that needs more than
+   that is carrying history, not state; move the history to the cycle
+   retro and point at it ("full lineage: git/cycles.log/funnel
+   <daterange>"). Decision-critical content — clause readings, entry
+   facts, pre-registered grading questions, standing instructions —
+   always stays in the item; the cap is met by cutting repetition,
+   never by cutting the things grading needs.
+3. **ARCHIVED items get pruned by the next deep retro** after their
+   grading has landed in a retro. Git retains them; the working file
+   does not.
+
+Applied 2026-09-14: items 4/5/9/10 compressed to decision-relevant
+cores, three ARCHIVED items pruned, 87KB → ~30KB. Nothing needed for
+the pending Sweden/Iran/Russia gradings was dropped (verified against
+the pre-registrations in item 11 and the clause reading in item 5).
+
+## Grading duty discharged: 0ed1d77858d7 settled LOST, clause-mapping error confirmed (RETRO-20260915-2015)
+
+The Iran Sep7 ceasefire No bet (`0ed1d77858d7`, est 0.93 @0.54, edge
+0.39, edge_class info-race) settled **LOST** 2026-09-15 — the market
+resolved Yes (clean 14-day window completed). Per the grading duty
+pre-registered at line ~300 above (RETRO-20260907-1758 §2), this row is
+graded as a **clause-mapping error, not a fact-quality error**: the
+CENTCOM Sep 1 strike was correctly sourced and verified multi-source
+(condition (i) of the fact-finality gate was genuinely satisfied on the
+fact itself), but the entry rationale quoted the clause's own sentence
+("...if the most recent qualifying military action occurred on or
+before the specified end date") and then read it backwards, calling a
+window that the clause explicitly permits to run past the end date
+"arithmetically impossible." The 2026-09-07 correction diagnosed this
+within 2 days of entry; today's settlement confirms that corrected
+diagnosis was right, and no further gate change follows from it — the
+gate already requires showing the (a)/(b) clause-to-outcome mapping,
+and this loss is exactly the failure that requirement targets.
+
+**Tally update.** This is the first `>0.10-claimed-edge` bet to settle
+since the founding set closed at 0W/8L (RETRO-20260901-0639); it
+extends the tally to **0W/9L, -$45**. Distinct from the founding set's
+failure modes (documented-but-unfinished process: GTA VI, Lake America;
+resolver-interpretation: ai-leaderboard), this row is the gate's first
+settled instance of a *clause-mapping* failure specifically — worth
+tracking as its own sub-shape if a second instance appears, since the
+fix (require the explicit (a)/(b) mapping) is different from either of
+the other two.
+
+**Second finding, not yet a rule.** The six re-checks after the 2026-09-07
+correction (est walking 0.40 → 0.45 → 0.55 → 0.35 → 0.32 → 0.27) held
+above the market's No price at every checkpoint from Sep 9 onward, and
+the market was closer to the true outcome (No never occurred) at every
+one of those checkpoints. Each re-check found a residual reason
+("Kharg/Jask anchorage might still be judged qualifying," "a new strike
+might still land") to stay above the market rather than converge to it.
+One position is not enough to generalize from — flagging as a pattern
+to watch: an already-held position with no exit may bias re-checks
+toward finding reasons the original thesis still holds rather than
+updating fully to the market on the residual risk that justified
+staying in. No gate change from n=1; revisit if a second held position
+shows the same shape at settlement.
+
+## DEEP-2026-09-16: forecast-stream category calibration at n=637, and the research-allocation rule
+
+Full table in `core/score.py --json` → forecasts.by_category; snapshot
+recorded here because it is the first time the stream is large enough to
+rank categories rather than eyeball them. Overall: n=637, delta +0.0071,
+z −0.03 — market-flat.
+
+**Worse than market at n≥9 (delta = brier_agent − brier_market):**
+ai-model-release +0.0806 (n=31), market-microstructure +0.0750 (n=9),
+weather +0.0529 (n=33), politics-primary +0.0427 (n=14, betting already
+banned), news +0.0362 (n=15), social-media-postcount +0.0304 (n=23),
+econ +0.0292 (n=19). **Better than market at small n:** commodities-touch
+−0.0529 (n=9), mlb-moneyline −0.0499 (n=15), politics-general −0.0490
+(n=9), say-the-word −0.0243 (n=8), product-release −0.0921 (n=4). Every
+large-n cell is flat (soccer n=91 −0.0055, soccer-moneyline n=33,
+mlb-totals n=30, wnba-moneyline n=26, tennis-moneyline n=25, all within
+±0.012) — the clean-feed null generalizes: liquid sports price to noise.
+
+Allocation rule (research priority, NOT a betting gate — no floor or veto
+changes): when a FULL cycle must triage escalated candidates, prefer
+candidates in the negative-delta small-n cells above (they are where the
+stream needs n most, and where, if an edge exists, it will show first)
+over candidates in the n≥9 worse-than-market cells, which get research
+time only with a mechanical anchor (official print, transcript count,
+cross-market arithmetic). This legislates nothing about bet eligibility;
+existing gates decide that. Re-rank at the next deep retro; drop any
+"promising" cell that turns flat or positive as its n grows — at current
+n all negative deltas are within noise and this is a prioritization
+heuristic, not an edge claim.
+
+**DEEP-2026-09-17 re-rank (n=750 settled, overall delta +0.0086, window
+added 58 settlements dominated by two correlated word-count events —
+Warsh FOMC presser 21 rows, Trump Gastonia rally ~10 rows).** Moves
+since yesterday's snapshot, per the re-rank duty above:
+
+- **DROPPED from the promising list: say-the-word** −0.0243 (n=8) →
+  −0.0012 (n=42). The Warsh/Gastonia batch flattened it exactly as the
+  rule anticipated ("drop any promising cell that turns flat as its n
+  grows"). Worse, the window's mid-priced interpretive slice (market
+  0.2–0.8, n=17) ran +0.0290 AGAINST us — point-estimate word-frequency
+  models on mid-range words lose to the market; the flat aggregate is
+  carried by near-certain habit words priced ≥0.85 where we match the
+  market. Research priority: only mechanical, margin-clearing threshold
+  counts (speaker-only, per the method note), not mid-range presence
+  guesses. n caveat: the 31 window rows come from 2 events, so the
+  mid-range read is 2 correlated samples, not 17 independent ones.
+- **DROPPED: product-release** −0.0921 (n=4) → +0.0631 (n=5). One
+  settlement flipped the sign — which is the proof it was noise.
+- **ADDED (candidate, same caveats): econ-rates** −0.0322 (n=22), the
+  best negative delta at n≥20 after the FOMC cluster settled clean.
+  Honest deflator: most of those rows are market-agrees/no-edge skips
+  clustered on a handful of Fed events, so the cell is calibration of
+  agreement, not evidence of disagreement edge.
+- **Holding:** mlb-moneyline −0.0499 (n=15), commodities-touch −0.0461
+  (n=10), politics-general −0.0443 (n=11).
+- **Worse-than-market cells hardened:** news +0.0362 (n=15) → +0.0581
+  (n=33) — the Israel×Lebanon diplomatic-meeting family settled Yes
+  against every own-No lean, same multi-channel-process shape as prior
+  losses; ai-model-release +0.0607 (n=40), weather +0.0566 (n=34),
+  market-microstructure +0.0612 (n=11) unchanged in kind. The
+  mechanical-anchor requirement for research time in these cells stands.
+
+**DEEP-2026-09-26 re-rank (n=872 settled, overall delta +0.0083; first
+re-rank since 09-17).** The promising list has thinned exactly as the
+rule predicted:
+
+- **DROPPED: politics-general** −0.0443 (n=11) → +0.0146 (n=59).
+- **DROPPED: econ-rates** −0.0322 (n=22) → +0.0094 (n=22, re-scored).
+- **Holding (still small n, still noise-level):** commodities-touch
+  −0.0378 (n=14), crypto-touch −0.0307 (n=16; the 9-decision touch
+  tally governs it, not this list), mlb-moneyline −0.0499 (n=15, no new
+  rows since 09-16 — structurally starved: no ODDS_API_KEY).
+- **Hardened worse-than-market: social-media-postcount** +0.0304 (n=23)
+  → **+0.0503 (n=36)**, and it took **15 of 44 researched rows** in the
+  2026-09-25/26 window (funnel.jsonl), more than any other cell, while
+  the category bar means none can be bet. The screener keeps escalating
+  Musk/Trump brackets because Haiku's prior is stale, not because the
+  book is wrong. **Rule: at most ONE social-media-postcount event
+  family per FULL cycle gets research** (all brackets of one
+  account-window count as one family), unless it is grading an open
+  forecast's pre-registered check. The freed slots go to the holding
+  cells above or to an unresearched category. Research priority only,
+  no gate change; revisit when postcount delta turns ≤ 0 at n ≥ 50.
+- ai-model-release +0.0838 (n=35), weather +0.0495 (n=34), news
+  +0.0246 (n=32), market-microstructure +0.0750 (n=9): unchanged in kind.
+
+## DEEP-2026-09-26: record the mechanical read; unmeasured shades go in the note
+
+The hourly agent wrote four separate rules in one day (playbook lines
+tagged RETRO-20260925-1812, -2015, -2213, and RETRO-20260926-0415 logged
+the fifth instance for this retro) that all say one thing. The
+shaded-vs-raw tally they pre-asked for, one row per independent event:
+
+| Event | Mechanical read | Recorded (shade) | Shade source | Brier effect of shade |
+|---|---|---|---|---|
+| Musk Sep 18-25 weekly (`431d16dbbd6f`, `4b1aec60bfc7`) | bootstrap 0.50-0.525 / 0.273 | 0.40 / 0.30 | short-run slowdown | worse (+0.134, +0.046) |
+| Dem Senate odds bands Sep 25 (3 rows) | driftless normal 0.49/0.39 | 0.44/0.44 | week-drift momentum | worse (family 0.510 vs 0.414) |
+| PLTR HIGH $195 (`a468e40297ae`) | touch.py from close 0.678 | 0.74 | NQ-beta inferred open | worse (+0.088) |
+| Volynets–Birrell (`b5774501ec4c`) | single-book devig 0.636 | 0.68 | toward market consensus | worse (+0.058) |
+| SPY LOW $760 (`23a99c8fe4e8`) | touch.py 0.118 | 0.08 | **measured** ES overnight print | better (−0.0075) |
+| Bondar–Ruse (`8785a067de69`, added RETRO-20260926-0615) | single-book devig 0.591 | 0.60 | toward market consensus | worse (+0.011) |
+
+Unmeasured shades: 0 for 4 independent events (sign test p≈0.06
+one-sided, small n, but the direction has never flipped). Update
+RETRO-20260926-0615: 0 for 5 (p≈0.03 one-sided). The one shade
+grounded in a measured, quoted input helped. **General rule (replaces
+the four per-category copies, which stay as the evidence log):** when a
+row has a named mechanical or benchmark read (touch.py, a bootstrap, a
+driftless resolver-series model, a devigged book, a nowcast), est_prob
+IS that read. A shade enters est_prob only when it is driven by a
+measured print quoted in the note (source + number + timestamp).
+Anything else, including recency, momentum, "the market thinks
+otherwise" and inferred opens, is written as "shade view: X" in the note
+and not recorded. Two scoped exceptions, both about a DEFECTIVE input
+rather than a shade: (a) the liquid near-certain sibling rule
+(RETRO-20260926-0015, Trump Truth `c5737eab7350`), and (b) the
+official-figure centring rule for turnout/seat counts (RETRO-20260925-
+1421). **Tally continues:** every settled row whose note carries a
+"shade view" gets one line in its retro: raw Brier vs shade Brier.
+The next deep retro to see ≥ 8 independent events re-grades this rule. If
+shades are winning by then, relax it. This changes recording, not bet
+eligibility: every existing gate still decides whether a row can bet.
+
+## DEEP-2026-09-16: position-holding re-check bias, pre-registered as a graded pattern
+
+RETRO-20260915-2015's second finding, hardened from a loose flag into
+something falsifiable. Pattern: an already-held position with no exit
+mechanism may bias re-checks toward reasons the thesis still holds
+rather than converging to the market (Iran 0ed1d77858d7: six
+post-correction re-checks all held own-No above market-No; market was
+closer at every checkpoint from Sep 9 on). Rule, effective now: when a
+held-to-resolution position that accumulated ≥3 re-check estimates
+settles, the settling retro must grade the re-check chain — count
+checkpoints where own est was closer to the outcome than the
+contemporaneous market price, and append one line here:
+`<ledger id>: own-closer k of m checkpoints`. Current tally: Iran
+0ed1d77858d7: own-closer 0 of 6 (post-correction chain). If the tally
+reaches 3 positions with own-closer in a minority of checkpoints,
+enact a convergence rule (re-checks that find no NEW qualifying fact
+must supersede toward the market, not hold); until then this is
+bookkeeping only. Candidates in flight: MV CDU 23e40bbbccc5 (already ≥4
+re-checks), Sweden next-PM e746d7e1ba99, Russia UR 9074e3f2fd49.
+
+## Two reachable benchmarks found on first contact (2026-09-17 16:0xZ, FULL cycle, operator machine)
+
+Method notes, not rule changes: no gate, floor or veto moves until the rows
+below settle. Evidence is the research record of this cycle (forecast ids
+inline); grading duties sit in the schedule.json watch items.
+
+**1. Commodity touch ladders: read the Active Month clause before the
+spot price.** The WTI "hit (HIGH/LOW) $X in September" rules define the
+Active Month as rolling to the next contract at the start of the second
+trading session before the front contract's last trading session. For
+September 2026 that is 22:00Z Sep 17 (Oct LTD Tue Sep 22), and the curve
+was in steep backwardation: Oct 100.78, Nov 96.27, Dec 92.12
+(oilprice.com). From the headline ~$100.5 "spot", LOW $95 at 0.81 and
+LOW $90 at 0.50 look absurd; against the Nov contract they are fair. With
+a SOURCED vol input (OVX 57.49, FRED OVXCLS - the first non-guessed vol
+in the commodities-touch cell, which the touch-family ruling requires) a
+martingale reflection model on S=96.27 with 9 sessions left reproduced
+six of seven PM rungs within 0.05 (LOW90 0.553 vs 0.50, LOW85 0.268 vs
+0.23, HIGH105 0.420 vs 0.43, HIGH110 0.205 vs 0.20). The market prices
+the roll and prices at implied vol. The one rung off the model was LOW95
+(0.909 vs ask 0.81). Forecast-only under the touch-family gate
+(18672a24a234, 98134efdddcf, 0ad60d107c54, 52fac91e76d7, 41c92e76901c).
+The Aug 18 first test (8 legs, guessed 38pct vol, front-month spot) never
+read this clause; any re-read of those rows should check whether a roll
+fell inside that window before blaming the vol input.
+
+**2. PCE brackets: the Fed chair's presser opening statement carries a
+staff estimate.** After CPI and PPI, the opening statement gives the
+staff translation to 12-month PCE (Sep 16: total "around 3.6 percent",
+core "about 3.2 percent"). It is a named, dated, primary source, and it
+is reachable from this runner (the PDF needs the stdlib zlib extraction;
+poppler is absent). On first contact it sat 0.2 below the Cleveland Fed
+nowcast on BOTH total and core (3.78 / 3.40), and bank trackers split the
+same way (GS 3.16 vs BofA 3.4), attributed to the annual revisions
+landing in the same BEA release. PM's modal bucket was 3.3, the July
+print, which neither camp forecasts. One standard-floor bet, 3.3 No
+(8894592b953a, edge 0.08); the 3.2 Yes leg stayed vetoed (edge 0.13,
+spread 0.10) because the staff estimate's hit rate is recalled, not
+sourced - gate 2's variance clause, unchanged. If the revision camp is
+right at settlement, the next step is to source that hit rate (chair
+statement vs printed value, 2024 on) so the carve-out can be tested on
+it; if wrong, record that "running at about" is looser than the
+Powell-era formula and stop treating it as a staff point estimate.
+
+**Mech, same cycle (3 market-aware + 1 paired v4, all off-chain first
+try, context delivered: `market_prob_seen` equalled the sent price on all
+three).** The tool's retrieval missed the decisive current fact on every
+question: the Warsh/GS/BofA numbers (PCE), the revision variance (UMich,
+p_independent 0.85 on "prelim is inside the bracket"), and the November
+contract price (WTI, although the prompt spelled out the roll).
+Polymarket-derived pages ranked in the serper top 7 on two of three (UMich: June
+event page #1 and a stale "27%" snippet; WTI: event page #1, laikalabs
+"76%", chanceindex), price-leak instances five and six. Grade at
+settlement; nothing to act on yet.
+
+## News-cell process-shape bar (enacted RETRO-20260918-1518)
+
+**Rule.** In category `news`, a candidate is **forecast-only** (skip-reason
+`process-shape-bar`, no `place`) when all three hold:
+
+1. the question is "will a government, agency, or institution do or
+   complete X by a date";
+2. the process is documented as active (a program that has shipped before,
+   a named official saying work continues, talks under way);
+3. my P(Yes) is below the market's P(Yes), at any edge size.
+
+Record the forecast exactly as before, honest estimate included. The bar
+changes bet eligibility only.
+
+**Evidence.** Five settled news bets have this shape and all five lost,
+-$25: `d2dd24206542` (ceasefire Jul 31, No at 0.92), `bbe450e04eb9` and
+`6f7dfb5b7c0c` (Lake America, No at 0.668 and 0.38), `0ed1d77858d7` (Iran
+ceasefire Sep 7, No at 0.54), `d8892ff1a36a` (UFO files, No at 0.139). At
+the prices paid the market gave that joint outcome 0.0065; my estimates
+gave it 0.000008. The two Lake America rows are one event family: four
+independent observations. The proximate failure differed each time (clause
+mapping, unfinished-process read, cadence read). The common factor is
+reading "not done yet" as "may not get done" on a process the market can
+also see. `d8892ff1a36a` was the deliberate fair trial: sub-0.10 edge,
+outside-view shrink already applied (raw 0.72 -> 0.78), and the market's
+0.875 was still closer. The shrink is therefore not a sufficient fix, and
+it is retired as a route to a bet in this shape.
+
+**Exception.** A dated official fact that maps to No through the clause
+itself: the actor states the act will not happen before the deadline, or a
+scheduled date falls after it. That goes through the fact-finality gate
+with the explicit (a)/(b) clause-to-outcome mapping, as today. "No release
+found in N searches" and "the cadence has slipped" are absences, not facts,
+and never qualify.
+
+**Not covered.** Own-Yes leans in the news cell (n=1, `b21e42c123a1`, a
+different failure), other categories, and mechanical anchors (official
+print, transcript count, cross-market arithmetic).
+
+**Re-open condition.** Rows skipped under this bar are graded as their own
+slice at each deep retro. When 10 have settled, lift the bar if their
+forecast brier_delta is at or below 0; keep it otherwise. Until then, the
+DEEP-2026-09-16 allocation rule already says these rows get research time
+only with a mechanical anchor, so the bar should cost few research slots.
+
+**Mech note, same settlement.** Market-aware `p_independent` on the UFO row
+was 0.72, identical to my raw hazard read, and both sat 0.15 under a market
+that was right. Its price-informed `p_yes` 0.82 beat me (brier 0.0324
+versus 0.0484) and lost to the mid (0.0154). n=1 in the post-2026-09-14
+window; no paired v4 on this market.
+
+**First settled mech pair in the window (RETRO-20260921-1330, market
+1130012, UR gains most seats, outcome Yes).** Service 21, requests dated
+2026-09-17. Brier in question frame: market-aware `p_independent` 0.88 ->
+0.0144, market-aware `p_yes` 0.86 -> 0.0196, mid 0.755 -> 0.0600, own
+recorded 0.65 -> 0.1225, v4 blind 0.62 -> 0.1444, own pre-mech 0.59 ->
+0.1681. Market-aware beat the price, me and v4; the price pulled it 0.02
+the wrong way, and its lead over v4 came from retrieval (page bodies
+against snippets). I took about a quarter of the gap to a delivery with
+researchability 0.95, class R, `parse_tier` clause. Window tally:
+market-aware settled rows 2, settled pairs 1. No weighting rule at this n;
+re-read at 5 settled pairs.
+
+## Record-time category tag is immutable — check it before recording (DEEP-2026-09-20)
+
+**Rule.** The `category` on a forecast (or bet) row is set once, at record
+time, by me — and only core writes the journals, so a wrong tag can never
+be corrected afterward. Before calling the record step, confirm the
+category matches the event's actual sport/domain, especially on
+sibling-census sweeps where several rows are recorded in one pass. If a
+tag is discovered wrong *before* recording, fix it; discovering it wrong
+*after* recording (as at 14:19Z on 2026-09-19) leaves a permanent alien
+row in a graded cell.
+
+**Evidence.** Forecast `32f25ca85db8` (BYU vs. Colorado State, an NCAAF
+game) was recorded under `mlb-spreads` on the 2026-09-19 14:19Z FULL
+cycle; the cycle summary itself flagged it as mis-recorded in the same
+breath, so the information existed before the write. It settled
+2026-09-20 (WON, no-edge skip, dB −0.0038) and now sits permanently in
+the `mlb-spreads` forecast cell. One row is noise today, but per-cell
+`brier_delta` is the instrument this whole experiment steers by
+(research-allocation rule, DEEP-2026-09-16), and cells are small — a
+handful of alien rows is enough to flip a small-n cell's sign.
+
+**Reading rule until further notice.** When quoting the `mlb-spreads`
+forecast cell, note it contains one NCAAF row (`32f25ca85db8`). Do not
+hand-edit journals to "fix" it — journals are core-written, full stop.
+
+## DEEP-2026-09-22: where the skill lives — the by-class ledger the next fortnight answers to
+
+All-time settled forecasts by skip_reason (own-side Brier vs the mid at
+record, n=846; bet rows use entry forecasts; cross-checked against
+`counterfactual.py` +0.0342 on the veto slice, same run):
+
+| class | n | dBrier |
+|---|---|---|
+| bet (entry forecasts) | 23 | **+0.080** |
+| outside-view-veto | 151 | +0.034 |
+| market-agrees | 122 | +0.006 |
+| no-edge | 429 | +0.002 (at-market by construction) |
+| category-bar | 29 | +0.002 |
+| unvalidated-method | 34 | **−0.013** |
+| wide-spread-veto | 16 | **−0.045** |
+
+And the bet book by placement era (n=41 settled): placed before Sep 1 —
+27 rows, −$31.67, dBrier +0.125; Sep 1–10 — 10 rows, +$34.65, +0.056
+(the P&L is one MLB moneyline outlier +$31.23); Sep 11+ — 4 rows,
+−$20.00, +0.083. Every era loses to the market; the improvement is real
+(the −1.0-ROI news/leaderboard/product-release rows are all pre-Sep)
+but no era has ever been ahead.
+
+**The structural fact:** the only two classes where own beats the
+market are both forecast-only by rule — the measured-vol touch family
+(inside unvalidated-method; re-graded 2026-09-23 at 7 rows / 5
+informative decisions, stays forecast-only, next bar pre-registered at
+10 decisions, see the touch-family section) and the
+wide-spread-veto slice (barred by max_spread; n=17 and dBrier −0.0327
+as of 2026-09-23, small) — while the
+class that actually bets is the worst in the book. The conclusion is
+NOT to promote either slice today: both have pre-registered triggers,
+and a deep retro that jumps a trigger because the table looks tempting
+is the exact post-hoc move the fork discipline exists to prevent
+(2026-09-22's fork status, two consecutive double-gate failures, shows
+what jumping would cost). The conclusion is a priority ordering for
+research allocation until a trigger fires:
+
+1. ~~Feed the touch-family counter its 6th measured row~~ RETIRED
+   DEEP-2026-09-24: at 7 informative decisions own is closer on 2, so
+   the pre-registered 60% bar is unreachable at 10 (see the touch-family
+   section). Record scan-surfaced touch rows only incidentally; do not
+   select them ahead of other candidates.
+2. Keep election self-model bets behind the price-inside-range rule and
+   the centre stress test; the German week (bets −$10, veto CF rows
+   2W/3L, market better on ~14 of 14 settled German rows) is this
+   family's third strike as a betting class in three countries.
+3. The mlb-moneyline cell (−0.0499, n=15, best in the book) stays
+   starved until ODDS_API_KEY lands on a runner — an operator ask, not
+   a strategy choice; nothing to do here but keep the cell's n growing
+   on scan-surfaced games.
+
+Audited and endorsed this pass (details in DEEP-2026-09-22.md): the
+price-inside-the-model-range rule, the no-bet-against-the-poll-trend
+rule and momentum joint verdict, the sd floor 3.0/2.5 with the centre
+stress test, the managed-election centring note, the WTI stale-window
+rule, the touch-counter pinning with the shade drop (caveat: the
+re-grade tests the UNSHADED method — 3 of the 5 counted rows were
+recorded shaded, say so when grading), and the tennis consistency rule.
+Reverts: none.
+
+## R1 mech-evaluation protocol: baseline always, and a daily sample that settles (operator note 2026-09-21 ~21:25Z, integrated 2026-09-22 ~14:1xZ)
+
+The 2026-09-21 ~21:25Z operator note changed how the mech step's R1
+evaluation has to be run, superseding CYCLE.md 5a's older "at least one
+candidate per cycle" baseline language. Checked against today's
+`journal/mech-requests.jsonl` before integrating: of the UTC-day's
+requests so far, only ONE market (4658702) had carried the full
+R1-aware / R1-blind / GPT-4.1-aware triple — the gap this note exists to
+close. Encoding it here since CYCLE.md itself is not mine to edit and a
+rule that lives only in an operator note gets missed by the next cycle
+that doesn't happen to re-read it word for word (exactly what happened
+today: four FULL cycles since the note posted, 00:30Z/04:16Z/06:19Z/
+08:23Z/10:14Z, none logged acting on it).
+
+- **Baseline always, not "at least one."** Every candidate that gets
+  the R1 pair (market-aware + blind) also gets the third request,
+  `superforcaster-market-aware` (GPT-4.1) with the same context, same
+  mech, sent sequentially last. No baseline means the eventual
+  four-way settlement line has a hole and R1 can't be compared to the
+  model it's replacing.
+- **A sample that settles.** Each UTC day, send the full three-request
+  set on at least 3 *researchable* markets (elections, rulings,
+  launches, scheduled decisions, dated public-record counts — not
+  live asset prices) that settle within 5 days, even on candidates
+  where the trade itself is skipped. Record the forecast as usual with
+  its real skip reason so it settles and grades. If the day's scan
+  doesn't surface 3 such candidates, say so in the cycle summary rather
+  than lowering the research bar to manufacture a count.
+- **Report researchable and price markets as two separate groups** in
+  retros and deep retros, each with its own settled-n and cumulative
+  Brier line (R1 market-aware / R1 blind / GPT-4.1 market-aware / own /
+  market). The published R1 evaluation excluded short-term asset
+  prices, so the researchable group is the fair test of the tool and
+  the price group is context only — keep sending the price-market set
+  when one comes up anyway, just don't count it toward the sample-of-3.
+
+Nothing else about the mech step changes: own estimate first, one
+precise question with the date near the front (front-loading rule
+above), no price in the prompt text, sequential sends, `mechlog.py
+record` on every attempt including failures. This cycle's own research
+step counts toward today's sample-of-3 tally.

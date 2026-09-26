@@ -1,52 +1,69 @@
-# Phil (self-improving trader)
+# Phil (self-improving trader), v2
 
-A self-improving trading agent for short-term Polymarket markets. The
-agent (Claude Code, headless) runs `CYCLE.md` repeatedly: settle → score →
-retrospective → edit its own strategy → research → place simulated bets.
+A self-improving trading agent for short-term Polymarket markets. `loop.sh`
+ticks hourly on this machine. A tick either:
+- settles only, with no LLM; or
+- runs `CYCLE.md` headless: settle → score → retro → lane pricing →
+  forecast → engine-decided paper bets.
+
+Once a day it runs `DEEP.md`, the audit and pruning retro, on a stronger
+model.
 
 ## Layout
 
-- `core/` + `config/protected.json` — PROTECTED simulation engine (honest
-  CLOB-ask fills, bankroll caps, official resolutions). The agent must never
-  edit these; `loop.sh` reverts any such change. Also operator-owned: the
-  top-level docs, `LICENSE`, and `.github/` (CI).
-- CI (`.github/workflows/ci.yml`) runs on every push: `core/validate.py`
-  integrity tripwires (real_trading_enabled stays false, JSONs parse, ledger
-  rows respect the protected caps, Python compiles), a bug-class-only ruff
-  pass, and a boundary guard — commits not prefixed `operator:` are agent
-  commits and must not touch operator-owned paths. Human commits to protected
-  files MUST use the `operator:` message prefix or CI fails the push.
-- `strategy/` — the agent's own playbook, risk policy, and tools. This is what
-  self-improves. Its git history IS the experiment's product.
-- `journal/` — ledger (JSONL, written only by core), retros, cycle log.
-- `CYCLE.md` — the per-cycle procedure the headless agent follows.
+- `core/` + `config/` — PROTECTED, operator-owned. The agent never edits
+  these; `loop.sh` reverts any such change and CI fails agent commits that
+  touch them.
+  - `core/decision.py` is the one decision engine behind paper placement,
+    replay and real twins. It fits the market-shrinkage weight λ per lane
+    from outcomes known at decision time. It trades on net edge, after VWAP
+    and the market's taker fee.
+  - `core/ledger.py place --forecast-id` is the only way into a bet.
+  - `core/replay.py` is the point-in-time engine replay.
+  - `core/gate.py` is the per-lane forward test that decides real-money
+    eligibility.
+  - `core/test_engine.py` holds the engine tests; CI runs them.
+  - `config/lanes.json` is the lane registry: methods, shape regexes, status
+    `forecast_only|paper|live`, and gate criteria.
+  - `config/protected.json` holds the caps and the engine bounds.
+- Also operator-owned: `CYCLE.md`, `DEEP.md`, `REAL.md`, `loop.sh`, the
+  top-level docs, `LICENSE`, `.github/`. Human commits to protected paths MUST
+  use the `operator:` message prefix, or CI's boundary guard fails the push.
+- `strategy/` — the agent's own:
+  - `playbook.md` (active rules, capped at 50 KB by CI);
+  - `risk.json` (stake and min_net_edge knobs inside the protected bounds);
+  - `tools/lanes.py` (lane router and pricers: the main self-improvement
+    surface), `tools/touch.py`, `tools/devig.py`;
+  - `lane-maps.json` (verified resolution mappings);
+  - `discovery.py` (scan queries);
+  - `schedule.json` (pacing);
+  - `watchlist.json` (watch triggers).
+- `journal/` — the ledgers are written only by core:
+  - `ledger.jsonl`, `forecasts.jsonl`, `real-ledger.jsonl`;
+  - `decisions.jsonl` — every engine verdict;
+  - `costs.jsonl` — LLM cost per tick;
+  - retros, the cycle log, `proposals.md` (agent → operator asks), and
+    `operator-notes.md`;
+  - `journal/archive/` — the pre-v2 playbook, proposals, schedule and funnel.
 
 ## Purpose
 
-Paper is the 24/7 learning engine (cloud loop, hourly): find WHERE fast
-research beats the market (calibration per category and edge class,
-`brier_delta` in `core/score.py`). Real execution runs only on the
-operator's machine via `./loop.sh --real`: qualifying paper bets (edge
-classes in `config/protected.json` → `real.allowed_edge_classes`) get a $1
-real twin on Polymarket through Pearl Connect.
-
-Whenever the local Pearl Connect signer is up (paper or real cycles on the
-operator's machine), the agent may also buy second-opinion predictions from
-the Olas mech marketplace (~$0.01 USDC each, paid by the service safe) —
-see CYCLE.md step 5a. Cloud cycles have no signer and skip this.
+Paper is the learning engine. Profitability is judged per lane by forward
+net P&L after fees, clustered by event. Real execution runs only on this
+machine via `./loop.sh --real`: engine-placed paper bets in lanes that are
+`live` (after a `core/gate.py` PASS and an operator commit) get a $1 real
+twin on Polymarket through Pearl Connect.
 
 ## Real execution (operator machine only)
 
 - Env: `PEARL_CONNECT_STORE` = Pearl Connect workspace dir (contains
   `.mcp.json`); optional `CONNECT_POLYMARKET_VENV` (default
   `~/.cache/connect-polymarket/venv`).
-- `core/real.py` (protected) is the only code that touches funds for
-  trading (mech second opinions per CYCLE.md 5a are the one non-trading
-  spend) — it wraps
-  the connect-polymarket skill scripts Pearl Connect provisions, enforces
-  the `real` caps block, and is the sole writer of
-  `journal/real-ledger.jsonl` (paper `ledger.jsonl` discipline mirrored).
-- `real_trading_enabled: true` + the `real` caps block are validated by CI
-  (`core/validate.py` hard ceilings). Editing either is an operator act.
-- REAL.md is appended to the cycle prompt only in real mode; loop.sh
+- `core/real.py` (protected) is the only code that touches funds. It
+  enforces the `real` caps block and lane gating, and is the sole writer of
+  `journal/real-ledger.jsonl`.
+- `real_trading_enabled` is currently false. Enabling it and listing lanes in
+  `real.allowed_lanes` are operator acts, and `core/validate.py` checks both:
+  the ceilings, and that every listed lane is live.
+- REAL.md is appended to the cycle prompt only in real mode. `loop.sh`
   downgrades to paper with a warning if the signer isn't ready.

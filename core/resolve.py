@@ -67,11 +67,13 @@ def settlement_ts(m, now):
 def settle_against_market(e, m, now):
     """Settle one open row against a fetched gamma market. Returns True if settled.
 
-    Bet rows (those with "shares") also get pnl_usd; forecast rows don't.
-    settled_ts is the market's close time, so the row is identical whichever
-    runner settles it. Nothing runner-specific (no wall clock) goes on the
-    row: the cycle log already records which tick noticed a settlement, and
-    a per-runner field would recreate the merge conflict this avoids.
+    Bet rows (those with "shares") also get pnl_usd, net of the taker fee
+    paid at entry (fee_usd; pre-v2 rows paid none). settled_ts is the
+    market's close time. noticed_ts is the wall-clock moment this settlement
+    was first seen: it is when the outcome became usable, so point-in-time
+    fitting (core/decision.py fit_lambda) keys on it. Phil v2 runs a single
+    runner, so the per-runner merge conflict that once kept wall-clock time
+    off the row no longer applies.
     """
     if not m.get("closed"):
         return False
@@ -82,8 +84,10 @@ def settle_against_market(e, m, now):
         won = e["outcome"] in decisive
         e["status"] = "won" if won else "lost"
         e["settled_ts"] = settlement_ts(m, now)
+        e["noticed_ts"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         if "shares" in e:
-            e["pnl_usd"] = round(e["shares"] - e["stake_usd"], 4) if won else -e["stake_usd"]
+            fee = e.get("fee_usd", 0.0)
+            e["pnl_usd"] = round((e["shares"] if won else 0.0) - e["stake_usd"] - fee, 4)
         e["outcome_won"] = max(zip(prices, outcomes))[1]
         return True
     end = dt.datetime.fromisoformat(e["end_date"].replace("Z", "+00:00"))
@@ -91,6 +95,7 @@ def settle_against_market(e, m, now):
         e["status"] = "void"
         # Deterministic too: the void boundary is a pure function of end_date.
         e["settled_ts"] = (end + dt.timedelta(hours=VOID_GRACE_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        e["noticed_ts"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         if "shares" in e:
             e["pnl_usd"] = 0.0
         return True

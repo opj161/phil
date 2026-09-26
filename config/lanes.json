@@ -1,0 +1,50 @@
+{
+  "_comment": "PROTECTED lane registry (operator-owned, like config/protected.json). A lane is a research METHOD with its own pricing tool. core/forecast.py rejects a forecast whose --method is not listed here or whose question does not match the lane's shape_regex, or that resolves sooner than the lane's min_days_to_end. core/decision.py trades only lanes with status paper or live, at a market-shrinkage weight lambda fitted per lane from outcomes known at decision time. status: forecast_only (recorded and scored, never traded) | paper (paper-traded; the paper record since registered_at is the lane's forward test) | live (paper + real twins via config/protected.json real.allowed_lanes). Moving a lane to live is an operator act, and only after core/gate.py reports PASS.",
+  "lanes": {
+    "barrier": {
+      "status": "paper",
+      "registered_at": "2026-09-26T13:00:00Z",
+      "shape_regex": "(?i)(\\b(hit|hits|reach|reaches|dip to|dips to|touch|touches)\\b[^?]*\\$\\s?\\d)|(\\b(close|closes|closed|settle|settles|finish|finishes|end|ends|be|is|trade|trades)\\s+(above|below|over|under|between|greater than|less than|higher than|lower than)\\b[^?]*\\$\\s?\\d)",
+      "description": "Price-path and price-level markets on a traded underlying (crypto, commodities, indices, equities) with at least min_days_to_end days left: touch/barrier, close-above/below and brackets. Priced by a driftless lognormal model with a sourced volatility (strategy/tools/touch.py via strategy/tools/lanes.py). Horizon floor (operator, 2026-09-26): settled barrier forecasts beat the market only at 3+ days (brier_delta -0.013 at 3-10d, -0.049 at 10d+) and trailed it under 3 days (+0.006 intraday, +0.070 at 1-3d), where 30-day implied vol also misstates the next hours (weekend BTC realized ~0.21 vs DVOL ~0.35).",
+      "min_days_to_end": 3
+    },
+    "barrier_equity": {
+      "status": "paper",
+      "registered_at": "2026-09-26T15:00:00Z",
+      "shape_regex": "(?i)(\\b(hit|hits|reach|reaches|dip to|dips to|touch|touches)\\b[^?]*\\$\\s?\\d)|(\\b(close|closes|closed|settle|settles|finish|finishes|end|ends|be|is|trade|trades)\\s+(above|below|over|under|between|greater than|less than|higher than|lower than)\\b[^?]*\\$\\s?\\d)",
+      "min_days_to_end": 3,
+      "description": "Single-stock and ETF price-path/level markets (ticker in parentheses), priced like barrier with a 30-day realized vol from daily closes. Its own lane so its lambda cannot contaminate the crypto/commodity barrier fit: single stocks jump on earnings, which realized vol misses, and the pre-v2 equity-touch record was n=2, brier_delta +0.163."
+    },
+    "devig": {
+      "status": "paper",
+      "registered_at": "2026-09-26T13:00:00Z",
+      "shape_regex": "(?i)(\\bvs\\.?\\s)|(\\bwin on 20\\d\\d-\\d\\d-\\d\\d\\b)|(^spread:)|(\\bO/U\\s?\\d)|(end in a draw)",
+      "description": "Sports markets with a sharp-bookmaker benchmark: de-vigged consensus odds (core/odds.py + strategy/tools/devig.py)."
+    },
+    "mention": {
+      "status": "paper",
+      "registered_at": "2026-09-26T13:00:00Z",
+      "shape_regex": "(?i)\\b(say|says|said|mention|mentions|mentioned)\\b",
+      "description": "Say-the-word / mention markets priced from counted base rates of the speaker's comparable, post-topic appearances."
+    },
+    "latency": {
+      "status": "forecast_only",
+      "registered_at": "2026-09-26T13:00:00Z",
+      "shape_regex": null,
+      "description": "Stale book after a FINAL, resolution-source fact (e.g. a game already over). No tooling yet; forecast-only until it has evidence."
+    },
+    "explore": {
+      "status": "forecast_only",
+      "registered_at": "2026-09-26T13:00:00Z",
+      "shape_regex": null,
+      "description": "Everything else (narrative research). Forecast-only: measured, never traded. A method that shows skill here gets its own lane by operator decision."
+    }
+  },
+  "gate": {
+    "_comment": "core/gate.py judges each paper lane on its paper bets placed since registered_at. PASS needs min_events distinct events, the event-clustered net ROI lower bound (mean - 1 SE) above min_lcb_net_roi, and no single event carrying more than max_event_share of total positive P&L. FAIL (demote to forecast_only) when at least kill_after_events events are in and the upper bound (mean + 1 SE) is below 0.",
+    "min_events": 30,
+    "min_lcb_net_roi": 0.0,
+    "max_event_share": 0.5,
+    "kill_after_events": 30
+  }
+}

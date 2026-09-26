@@ -1,291 +1,213 @@
 #!/usr/bin/env python3
-"""Walk-forward replay of a betting policy over the frozen forecast ledger.
+"""Point-in-time replay of the decision engine over the frozen forecast ledger.
 
 PROTECTED CORE — the trading agent must not edit files under core/.
 
-The forecast ledger (journal/forecasts.jsonl) records every researched
-candidate with the agent's belief (est_prob) and the book at record time
-(best_bid/best_ask). Beliefs are frozen; this tool asks only "given those
-beliefs, which bets should have been placed, on which side, and how big?"
-and scores a policy module (default strategy/policy.py) on held-out data.
+Every settled forecast is replayed in record-time order through the SAME
+engine that places paper bets (core/decision.py), with only what was knowable
+at that moment:
+  - the lane weight lambda is fitted from forecasts whose outcome was known
+    before the row was recorded (noticed_ts, else settled_ts + lag): no
+    future label can reach the fit, unlike the fold replay this replaces
+    (which trained on earlier-RECORDED rows whatever their settlement time).
+    Below lambda_min_events a paper lane gets the cold-start prior, exactly
+    as live placement does (decision.lane_lambda);
+  - the book is the one recorded with the forecast. The complement side's
+    ask is approximated as 1 - recorded bid (the live engine reads the
+    complement's own book), and depth beyond the recorded top level is not
+    known, so a top level too small for the stake falls back to a 1c-worse
+    level;
+  - fees are the market's recorded taker terms; rows recorded before fee
+    terms were captured get an ASSUMED rate by category (--assume-fees
+    category, the default, or none), flagged in the report;
+  - open simulated bets count against the event and hourly caps until their
+    outcome was known. Cash is not simulated.
 
-Policy contract (strategy/policy.py):
-  fit(history) -> state        optional; history = settled rows the policy
-                               may learn from (all rows strictly before the
-                               fold being scored, WITH outcomes in `won`).
-  decide(row, state) -> None | {"side": "yes" | "no", "stake_usd": float}
-                               row = the forecast as recorded, outcome
-                               fields stripped. None = no bet.
+Lanes trade per their current config/lanes.json status; --all-lanes replays
+every method as if tradeable (research view, never a promotion argument).
+Legacy rows carry a backfilled method_inferred. Replay is IN-SAMPLE for any
+rule chosen by reading this ledger; only paper bets after a lane's
+registered_at (core/gate.py) are forward evidence.
 
-Fill model (mirrors core/ledger.py: honest CLOB fills, no mid):
-  yes  buys the recorded outcome token at best_ask_at_record
-  no   buys the complement at (1 - best_bid_at_record)
-  pnl  = stake / price - stake if the side wins, else -stake
-Protected caps (config/protected.json) apply: stake is clipped to
-max_stake_usd, entries outside [min_entry_price, max_entry_price], banned
-question patterns and < min_minutes_to_resolution are rejected (no fill).
-
-Walk-forward: settled rows are sorted by record time and cut into K
-contiguous folds. Fold 0 is training-only. For each later fold the policy
-is fitted on every earlier fold and scored on that fold. The held-out
-score is the aggregate over folds 1..K-1.
-
-Reported on the held-out set:
-  n_bets, staked, pnl, roi = pnl / staked (stake-weighted return),
-  cw_return = roi - 1 stake-weighted standard error of the per-bet return
-              (the selection score: a policy must be robustly, not luckily,
-              positive; zero bets scores 0),
-  brier_delta = mean Brier(est_prob) - mean Brier(market mid at record)
-              over the rows the policy bet on (negative = the beliefs the
-              policy chose to act on beat the market).
-
-Forward test (--after TS): instead of folds, score the policy on every row
-whose outcome was still unknown at TS (settled_ts > TS), fitting on the
-rows settled by then. Rows recorded before TS but settled after it count:
-nobody could have tuned on their outcome. This is the only true
-out-of-sample score for a policy whose thresholds were chosen by reading
-the ledger.
-
-Usage: python3 core/replay.py [--policy PATH] [--folds K] [--after TS]
-                              [--json] [--bets]
+Usage: python3 core/replay.py [--after TS] [--all-lanes]
+                              [--assume-fees category|none] [--json] [--bets]
+  --after TS   only rows whose outcome was unknown at TS (settled_ts > TS)
 """
 import argparse
 import datetime as dt
-import importlib.util
 import json
-import math
 import pathlib
-import re
 import sys
+from collections import defaultdict
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import decision  # noqa: E402
+import stats  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FORECASTS = ROOT / "journal" / "forecasts.jsonl"
 PROTECTED = json.loads((ROOT / "config" / "protected.json").read_text())
-DEFAULT_POLICY = ROOT / "strategy" / "policy.py"
+LANES = json.loads((ROOT / "config" / "lanes.json").read_text())["lanes"]
+BIG = 1e9
 
-OUTCOME_FIELDS = ("status", "outcome_won", "settled_ts", "superseded_by",
-                  "superseded_ts")
-
-
-def _parse_ts(s):
-    """ISO-8601 UTC timestamp; end_date may carry fractional seconds."""
-    if s.endswith("Z"):
-        s = s[:-1]
-    return dt.datetime.fromisoformat(s).replace(tzinfo=dt.timezone.utc)
-
-
-def load_rows():
-    """Settled, fillable, non-superseded forecasts in record-time order."""
-    rows = []
-    with open(FORECASTS) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            r = json.loads(line)
-            if r.get("status") not in ("won", "lost"):
-                continue
-            if r.get("superseded_by"):
-                continue  # a later belief on the same market replaced it
-            if r.get("best_ask_at_record") is None:
-                continue  # no book at record time: nothing could fill
-            rows.append(r)
-    rows.sort(key=lambda r: (r["ts"], r["id"]))
-    return rows
+# Polymarket taker-fee categories (help center, Trading Fees, 2026-07), mapped
+# from the agent's category labels. Used ONLY for legacy rows recorded before
+# per-market fee terms were captured; fee-free markets exist in every
+# category, so this errs toward charging.
+ASSUMED_FEE_BY_PREFIX = [
+    (("crypto",), 0.07),
+    (("say-the-word", "trump-mention", "vance-mention", "mention", "politic",
+      "commodit", "equit", "corporate", "ai-", "product", "app-store"), 0.04),
+    (("geopolitic", "news"), 0.0),
+]
+DEFAULT_ASSUMED_FEE = 0.05  # sports, economics, weather, culture, other
 
 
-def visible(r):
-    """The row as the policy may see it: no outcome, no supersession."""
-    return {k: v for k, v in r.items() if k not in OUTCOME_FIELDS}
+def assumed_fee(category):
+    c = (category or "").lower()
+    for prefixes, rate in ASSUMED_FEE_BY_PREFIX:
+        if any(c.startswith(p) for p in prefixes):
+            return rate
+    return DEFAULT_ASSUMED_FEE
 
 
-def history_row(r):
-    h = visible(r)
-    h["won"] = r["status"] == "won"
-    return h
+def load_forecasts():
+    return [json.loads(line) for line in FORECASTS.read_text().splitlines() if line.strip()]
 
 
-def load_policy(path):
-    spec = importlib.util.spec_from_file_location("replay_policy", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    if not hasattr(mod, "decide"):
-        sys.exit(f"policy {path} has no decide(row, state)")
-    return mod
+def replayable(r):
+    return (r.get("status") in ("won", "lost") and not r.get("superseded_by")
+            and r.get("best_ask_at_record") is not None
+            and r.get("best_bid_at_record") is not None)
 
 
-_BANNED = [re.compile(p) for p in PROTECTED["banned_question_patterns"]]
+def recorded_quotes(r, stake):
+    ask, bid = r["best_ask_at_record"], r["best_bid_at_record"]
+
+    def level(price, size):
+        # a recorded top level too thin for the stake gets a 1c-worse backstop
+        if size is not None and size * price < stake:
+            return [(price, size), (round(price + 0.01, 4), BIG)]
+        return [(price, BIG)]
+
+    yes = {"outcome": r["outcome"], "token_id": r.get("token_id"),
+           "bids": [(bid, BIG)], "asks": level(ask, r.get("ask_size_at_record"))}
+    no = {"outcome": "(complement)", "token_id": None,
+          "bids": [(round(1 - ask, 4), BIG)], "asks": [(round(1 - bid, 4), BIG)]}
+    return {"yes": yes, "no": no}
 
 
-def fill(r, decision):
-    """Apply the protected caps and the honest fill model.
-
-    Returns (price, stake, pnl) or None if the bet is rejected/unfillable.
-    """
-    if not decision:
-        return None
-    side = decision.get("side")
-    stake = float(decision.get("stake_usd", 0) or 0)
-    if side not in ("yes", "no") or stake <= 0:
-        return None
-    stake = min(stake, PROTECTED["max_stake_usd"])
-    if any(p.search(r["question"]) for p in _BANNED):
-        return None
-    try:
-        minutes = (_parse_ts(r["end_date"]) - _parse_ts(r["ts"])).total_seconds() / 60
-    except (KeyError, TypeError, ValueError):
-        minutes = None
-    if minutes is not None and minutes < PROTECTED["min_minutes_to_resolution"]:
-        return None
-    if side == "yes":
-        price = r["best_ask_at_record"]
-        wins = r["status"] == "won"
-    else:
-        bid = r.get("best_bid_at_record")
-        if bid is None:
-            return None
-        price = round(1 - bid, 4)
-        wins = r["status"] == "lost"
-    if price is None or not PROTECTED["min_entry_price"] <= price <= PROTECTED["max_entry_price"]:
-        return None
-    pnl = stake / price - stake if wins else -stake
-    return price, stake, pnl
-
-
-def market_prob(r):
-    """The market's own forecast at record time: the recorded mid, else the
-    bid/ask midpoint. Never the ask alone, which would bias the Brier
-    baseline against the market."""
-    if r.get("market_prob_at_record") is not None:
-        return r["market_prob_at_record"]
-    bid, ask = r.get("best_bid_at_record"), r.get("best_ask_at_record")
-    return (bid + ask) / 2 if bid is not None else ask
-
-
-def summarize(bets):
-    """bets: list of dicts with stake, pnl, est_prob, market_prob, won."""
-    n = len(bets)
-    if n == 0:
-        return {"n_bets": 0, "staked": 0.0, "pnl": 0.0, "roi": 0.0,
-                "cw_return": 0.0, "brier_delta": None, "win_rate": None}
-    staked = sum(b["stake"] for b in bets)
-    pnl = sum(b["pnl"] for b in bets)
-    roi = pnl / staked
-    # stake-weighted standard error of the per-bet return
-    var = sum((b["stake"] * (b["pnl"] / b["stake"] - roi)) ** 2 for b in bets)
-    se = math.sqrt(var) / staked if n > 1 else 1.0
-    ba = sum((b["est_prob"] - b["won"]) ** 2 for b in bets) / n
-    bm = sum((b["market_prob"] - b["won"]) ** 2 for b in bets) / n
+def run(forecasts, after=None, all_lanes=False, assume_fees="category"):
+    engine = PROTECTED["engine"]
+    cfg = decision.engine_cfg(PROTECTED, read_risk())
+    lag = engine["legacy_known_lag_hours"]
+    rows = sorted((r for r in forecasts if replayable(r)), key=lambda r: (r["ts"], r["id"]))
+    if after:
+        rows = [r for r in rows if (r.get("settled_ts") or "") > after]
+    open_bets, bets, rejects = [], [], defaultdict(int)
+    assumed = 0
+    lam_cache = {}
+    for r in rows:
+        t = decision.parse_ts(r["ts"])
+        open_bets = [b for b in open_bets if b["known"] > t]
+        method = decision.method_of(r)
+        status = "paper" if all_lanes else LANES.get(method, {}).get("status")
+        key = (method, r["ts"][:13])
+        if key not in lam_cache:
+            lam_cache[key] = decision.lane_lambda(method, status, forecasts, t, engine)["lam"]
+        if r.get("fee_rate") is not None:
+            fee = {"rate": r["fee_rate"], "exponent": r.get("fee_exponent") or 1.0}
+        else:
+            fee = {"rate": assumed_fee(r.get("category")) if assume_fees == "category" else 0.0,
+                   "exponent": 1.0}
+            assumed += 1
+        portfolio = {"open": open_bets,
+                     "recent": [b for b in open_bets if t - b["t"] < dt.timedelta(hours=1)],
+                     "cash": BIG}
+        d = decision.decide(r, recorded_quotes(r, cfg["stake_usd"]), fee, t, portfolio,
+                            status, lam_cache[key], cfg)
+        if not d["trade"]:
+            rejects[d["reason"]] += 1
+            continue
+        side_wins = (r["status"] == "won") == (d["side"] == "yes")
+        pnl = (d["shares"] if side_wins else 0.0) - d["stake_usd"] - d["fee_usd"]
+        b = {"id": r["id"], "t": t, "known": decision.known_ts(r, lag) or t,
+             "market_id": r["market_id"], "event_id": decision.event_of(r),
+             "event": decision.event_of(r), "stake_usd": d["stake_usd"],
+             "stake": d["stake_usd"], "pnl": round(pnl, 4), "fee": d["fee_usd"],
+             "side": d["side"], "price": d["vwap"], "net_edge": d["net_edge"],
+             "lam": d["lam"], "method": method, "est_prob": r["est_prob"],
+             "market_prob_at_record": r["market_prob_at_record"], "status": r["status"],
+             "category": r.get("category"), "question": r["question"][:60]}
+        open_bets.append(b)
+        bets.append(b)
+    by_method = defaultdict(list)
+    for b in bets:
+        by_method[b["method"]].append(b)
     return {
-        "n_bets": n, "staked": round(staked, 2), "pnl": round(pnl, 2),
-        "roi": round(roi, 4), "cw_return": round(roi - se, 4),
-        "brier_delta": round(ba - bm, 4),
-        "win_rate": round(sum(b["won_bet"] for b in bets) / n, 3),
+        "n_rows": len(rows), "after": after, "all_lanes": all_lanes,
+        "assumed_fee_rows": assumed if assume_fees == "category" else 0,
+        "overall": {**stats.clustered_roi(bets), "brier_delta": stats.brier_delta(bets),
+                    "fees": round(sum(b["fee"] for b in bets), 2)},
+        "by_method": {m: {**stats.clustered_roi(bs), "brier_delta": stats.brier_delta(bs)}
+                      for m, bs in sorted(by_method.items())},
+        "rejects": dict(sorted(rejects.items(), key=lambda kv: -kv[1])),
+        "bets": bets,
     }
 
 
-def score_rows(policy, rows, state):
-    """Apply the policy to each row and return the filled bets."""
-    bets = []
-    for r in rows:
-        filled = fill(r, policy.decide(visible(r), state))
-        if not filled:
-            continue
-        price, stake, pnl = filled
-        won = 1 if r["status"] == "won" else 0
-        bets.append({
-            "id": r["id"], "stake": stake, "pnl": pnl, "price": price,
-            "est_prob": r["est_prob"],
-            "market_prob": market_prob(r),
-            "won": won, "won_bet": 1 if pnl > 0 else 0,
-            "side": "yes" if price == r["best_ask_at_record"] else "no",
-            "category": r.get("category"), "question": r["question"][:60],
-            "settled_ts": r.get("settled_ts"),
-        })
-    return bets
-
-
-def forward(policy, rows, after):
-    """Score rows whose outcome was unknown at `after` (settled_ts > after)."""
+def read_risk():
     try:
-        _parse_ts(after)
-    except ValueError:
-        sys.exit(f"--after expects a UTC timestamp like 2026-09-02T00:14:36Z, got {after!r}")
-    train = [r for r in rows if (r.get("settled_ts") or "") <= after]
-    test = [r for r in rows if (r.get("settled_ts") or "") > after]
-    fit = getattr(policy, "fit", None)
-    state = fit([history_row(r) for r in train]) if fit else None
-    bets = score_rows(policy, test, state)
-    agg = summarize(bets)
-    agg["n_rows"] = len(test)
-    return {"cutoff": after, "train_rows": len(train), "held_out": agg,
-            "n_rows_total": len(rows), "bets": bets}
+        return json.loads((ROOT / "strategy" / "risk.json").read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 
-def replay(policy, rows, folds):
-    if folds < 2:
-        sys.exit("--folds must be >= 2")
-    size = math.ceil(len(rows) / folds)
-    chunks = [rows[i:i + size] for i in range(0, len(rows), size)]
-    fit = getattr(policy, "fit", None)
-    per_fold, held_out = [], []
-    for k in range(1, len(chunks)):
-        train = [history_row(r) for c in chunks[:k] for r in c]
-        state = fit(train) if fit else None
-        bets = score_rows(policy, chunks[k], state)
-        s = summarize(bets)
-        s.update({"fold": k, "n_rows": len(chunks[k]),
-                  "from": chunks[k][0]["ts"][:10], "to": chunks[k][-1]["ts"][:10]})
-        per_fold.append(s)
-        held_out.extend(bets)
-    agg = summarize(held_out)
-    agg["n_rows"] = sum(len(c) for c in chunks[1:])
-    return {"folds": per_fold, "held_out": agg, "n_rows_total": len(rows),
-            "train_only_rows": len(chunks[0]), "bets": held_out}
+def fmt(s):
+    se = "-" if s["se"] is None else f"{s['se']:.3f}"
+    bd = s.get("brier_delta")
+    bd = "-" if bd is None else f"{bd:+.4f}"
+    return (f"bets {s['n_bets']:>4} events {s['n_events']:>4} staked {s['staked']:>8.2f} "
+            f"pnl {s['pnl']:>+8.2f} roi {s['roi']:>+7.3f} se {se:>6} lcb {s['lcb']:>+7.3f} "
+            f"dBrier {bd}")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--policy", default=str(DEFAULT_POLICY))
-    ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--after", metavar="TS",
-                    help="forward test: score only rows settled after this UTC "
-                         "timestamp (e.g. 2026-09-02T00:14:36Z); no folds")
+                    help="only rows whose outcome was unknown at this UTC timestamp")
+    ap.add_argument("--all-lanes", action="store_true",
+                    help="treat every method as tradeable (research view)")
+    ap.add_argument("--assume-fees", choices=("category", "none"), default="category")
     ap.add_argument("--json", action="store_true")
-    ap.add_argument("--bets", action="store_true", help="list every held-out bet")
+    ap.add_argument("--bets", action="store_true", help="list every replayed bet")
     a = ap.parse_args()
-    rows = load_rows()
-    policy = load_policy(a.policy)
-    report = forward(policy, rows, a.after) if a.after else replay(policy, rows, a.folds)
+    if a.after:
+        try:
+            decision.parse_ts(a.after)
+        except ValueError:
+            sys.exit(f"--after expects a UTC timestamp like 2026-09-02T00:14:36Z, got {a.after!r}")
+    rep = run(load_forecasts(), a.after, a.all_lanes, a.assume_fees)
     if a.json:
-        print(json.dumps(report, indent=1))
+        out = dict(rep, bets=[{k: (v.isoformat() if isinstance(v, dt.datetime) else v)
+                               for k, v in b.items()} for b in rep["bets"]])
+        print(json.dumps(out, indent=1))
         return
     if a.bets:
-        for b in report["bets"]:
-            print(f"  {b['id']} {b['side']:>3} px={b['price']:.3f} est={b['est_prob']:.3f} "
-                  f"stake={b['stake']:.2f} pnl={b['pnl']:+7.2f} {b['category']:<24} {b['question']}")
-    if a.after:
-        h = report["held_out"]
-        bd = "-" if h["brier_delta"] is None else f"{h['brier_delta']:+.4f}"
-        print(f"forward test: {h['n_rows']} rows settled after {a.after} "
-              f"(policy fitted on {report['train_rows']} rows settled by then)")
-        print(f"score (forward cw_return): {h['cw_return']:+.4f}   pnl {h['pnl']:+.2f}   "
-              f"brier_delta {bd}   bets {h['n_bets']}/{h['n_rows']}")
-        return
-    print(f"replay: {report['n_rows_total']} settled forecasts, {a.folds} walk-forward folds "
-          f"(fold 0 = {report['train_only_rows']} rows, train only)")
-    hdr = f"{'fold':>4} {'dates':<23} {'rows':>4} {'bets':>4} {'staked':>7} {'pnl':>8} {'roi':>7} {'cw_ret':>7} {'dBrier':>8}"
-    print(hdr)
-    for s in report["folds"]:
-        bd = "-" if s["brier_delta"] is None else f"{s['brier_delta']:+.4f}"
-        print(f"{s['fold']:>4} {s['from']}..{s['to']:<11} {s['n_rows']:>4} {s['n_bets']:>4} "
-              f"{s['staked']:>7.2f} {s['pnl']:>+8.2f} {s['roi']:>+7.3f} {s['cw_return']:>+7.3f} {bd:>8}")
-    h = report["held_out"]
-    bd = "-" if h["brier_delta"] is None else f"{h['brier_delta']:+.4f}"
-    print(f"{'HELD':>4} {'out (folds 1..K-1)':<23} {h['n_rows']:>4} {h['n_bets']:>4} "
-          f"{h['staked']:>7.2f} {h['pnl']:>+8.2f} {h['roi']:>+7.3f} {h['cw_return']:>+7.3f} {bd:>8}")
-    print(f"score (held-out cw_return): {h['cw_return']:+.4f}   pnl {h['pnl']:+.2f}   "
-          f"brier_delta {bd}   bets {h['n_bets']}/{h['n_rows']}")
+        for b in rep["bets"]:
+            print(f"  {b['id']} {b['method']:<8} {b['side']:>3} px={b['price']:.3f} "
+                  f"est={b['est_prob']:.3f} lam={b['lam']:.2f} net={b['net_edge']:+.3f} "
+                  f"pnl={b['pnl']:+7.2f} {b['question']}")
+    scope = f"settled after {a.after}" if a.after else "all settled"
+    print(f"replay (point-in-time, engine {decision.ENGINE_REV}): {rep['n_rows']} {scope} "
+          f"forecasts; {'ALL lanes as tradeable' if a.all_lanes else 'lanes per config/lanes.json'}")
+    if rep["assumed_fee_rows"]:
+        print(f"  fees: {rep['assumed_fee_rows']} legacy rows priced at an ASSUMED category "
+              f"taker rate (conservative; --assume-fees none to drop)")
+    print(f"  overall   {fmt(rep['overall'])}  fees {rep['overall']['fees']:.2f}")
+    for m, s in rep["by_method"].items():
+        print(f"  {m:<9} {fmt(s)}")
+    print("  rejects: " + ", ".join(f"{k} {v}" for k, v in rep["rejects"].items()))
 
 
 if __name__ == "__main__":

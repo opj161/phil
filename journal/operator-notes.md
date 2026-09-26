@@ -1336,3 +1336,90 @@ note changes what to send. The 14:20Z note on what to record stands.
   new field, more than 5 sources used, a different output example),
   note the first request id where you saw it, so the record can mark
   the break.
+
+## 2026-09-26 ~13:00Z - Phil v2 cut-over: lanes, one decision engine, fees, point-in-time evaluation (operator, fork opj161/phil)
+
+This fork now runs on one machine, pays for cycles by subscription, and is
+paper-first. v2 rebuilds the loop around what the v1 journals show.
+
+**Evidence behind the change.**
+- 875 settled forecasts trail the market mid (Brier delta +0.008). The
+  least-squares blend gives the market 79% weight.
+- The 47 paper bets lost $8.54 and were overconfident (z −3.98). Without
+  two longshots the loss is −$80.
+- By method, only mechanical reads beat the market:
+  - barrier/touch at 3+ days;
+  - clean-feed devig;
+  - counted mention base rates.
+
+  Narrative, poll, sibling and post-count reasoning trailed it.
+- Taker fees (per-market `feeSchedule` in gamma, verified live) were never
+  charged.
+- Fold replay trained on outcomes that were not yet known.
+- The broker enforced only hard caps, so `policy.py` (replay) and
+  `risk.json` (live) were different policies.
+
+**What changed.**
+- **`core/decision.py`** is the single engine. It computes
+  p_trade = mid + λ_lane·(p_raw − mid), with λ fitted per lane from outcomes
+  known at decision time: `noticed_ts`, or `settled_ts` + 6h for legacy
+  rows. λ is 0 below 20 events and shrunk by n/(n+20). The engine then:
+  - walks both books (VWAP);
+  - subtracts the taker fee;
+  - requires a net edge between 0.02 and 0.15;
+  - enforces the caps on events, the hourly rate, spread, time and banned
+    shapes.
+
+  `core/ledger.py place --forecast-id` is the only way into a bet. Every
+  verdict goes to `journal/decisions.jsonl`.
+- **`config/lanes.json`** registers barrier (3+ days), devig and mention as
+  paper lanes, and explore and latency as forecast-only. `core/gate.py` is
+  the forward test for real money. `real_trading_enabled` is now false and
+  `real.allowed_lanes` is empty.
+- **One-time backfill.** Legacy forecasts and bets got a `method_inferred`
+  label, from category + note/rationale + question shape, and barrier rows
+  under 3 days became explore. They also got `event_id` from gamma: 979
+  markets map to 587 events. Nothing else on those rows changed.
+- **Removed.** The Haiku screener, mech second opinions, the runner lease,
+  the counterfactual/veto machinery, the dormant release calendar,
+  `policy.py` v3 and its forward test.
+- **Archived** under `journal/archive/`: the playbook (432 KB), proposals,
+  schedule and funnel. The new playbook is capped at 50 KB by CI.
+- **Loop.** `loop.sh` ticks hourly:
+  - LIGHT ticks settle without an LLM;
+  - FULL cycles run on `PHIL_MODEL` (Sonnet 5) when the schedule is due;
+  - `DEEP.md` runs daily on Opus;
+  - `core/watch.py` is polled every 15 minutes between ticks;
+  - every LLM tick's cost goes to `journal/costs.jsonl`.
+
+### Addendum, same day: what testing changed
+
+- **Cold-start λ.** A paper lane with fewer than 20 settled events trades
+  at λ 0.5, so its paper forward record can start. Without it, barrier and
+  mention could never bet, and `core/gate.py` counts paper bets. Real money
+  is still gated. Live lanes always use the fitted λ.
+- **`max_net_edge` 0.15.** Larger shrunk edges are rejected as probable
+  mapping or stale-input errors.
+- **Barrier supply.** The gamma tag queries in `discovery.py` (hit-price
+  102134, crypto-prices 1312, commodities 101031) take the priceable barrier
+  pool from 12 markets to about 600 on about 50 events.
+- **New lane `barrier_equity`.** Single stocks and ETFs get their own λ,
+  plus an earnings-window exclusion rule.
+- **Barrier pricing.**
+  - Placeholder and one-sided books (spread > 0.20) are refused by
+    `forecast.py`: a fake 0.50 mid would corrupt the λ fit.
+  - Realized-vol underlyings are priced on a trading-day clock.
+- **Batch path.** `lanes.py plan` → `forecast.py record-batch` →
+  `ledger.py place-batch`. The LLM verifies each new market series once
+  (`strategy/lane-maps.json`, 16 series seeded by the acceptance runs),
+  then recording and placing are mechanical.
+- **Acceptance runs** (two real FULL cycles, scratch clones, Sonnet 5):
+  - run 1: 62 forecasts, 0 bets (pre-prior);
+  - run 2: 60 forecasts, 10 barrier/barrier_equity paper bets, net edges
+    0.02-0.12 after fees, about $3 API-equivalent per cycle.
+- **Headless runs are isolated from the operator's personal setup:**
+  `--setting-sources project,local` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+- **In-sample replay** (point-in-time λ, assumed fees): 29 bets, 22 events,
+  +$90.66, event-clustered lower bound +0.33. The sign held under every
+  engine-parameter variant; mention was the fragile lane. Only the forward
+  gate counts.

@@ -4,10 +4,11 @@
 PROTECTED CORE — the trading agent must not edit files under core/.
 
 Wraps the connect-polymarket skill scripts that Pearl Connect provisions
-into its workspace. This file owns every real-money decision: caps, edge-
-class gating, one-real-bet-per-market, the daily stake cap, and the
-pending-order discipline (a buy is never idempotent — an ambiguous
-submission blocks further real bets until a settle reconciles it).
+into its workspace. This file owns every real-money decision: caps, lane
+gating (a twin only for an engine-placed paper bet in a lane that is live
+and listed in real.allowed_lanes), one-real-bet-per-market, the daily stake
+cap, and the pending-order discipline (a buy is never idempotent — an
+ambiguous submission blocks further real bets until a settle reconciles it).
 
 The Safe is the treasury; the maker is the Polymarket DepositWallet; the
 agent EOA signs through the local connect service. This wrapper never sees
@@ -192,10 +193,13 @@ def cmd_place(args):
     twin = paper.get(args.paper_id)
     if not twin:
         fail(f"paper ledger has no row with id {args.paper_id}")
-    edge_class = twin.get("edge_class", "unclassified")
-    if edge_class not in real["allowed_edge_classes"]:
-        fail(f"edge_class {edge_class!r} not in allowed_edge_classes "
-             f"{real['allowed_edge_classes']} — this bet stays paper-only")
+    lane = twin.get("method") or "unclassified"
+    lanes = json.loads((ROOT / "config" / "lanes.json").read_text())["lanes"]
+    if lane not in real["allowed_lanes"] or lanes.get(lane, {}).get("status") != "live":
+        fail(f"lane {lane!r} is not live and in real.allowed_lanes "
+             f"{real['allowed_lanes']} — this bet stays paper-only")
+    if not twin.get("engine_rev"):
+        fail("paper twin predates the decision engine — only engine bets get real twins")
 
     rows = real_rows()
     if any(r.get("status") in ("pending", "unknown") for r in rows):
@@ -223,7 +227,7 @@ def cmd_place(args):
     base = {"id": rid, "ts": now_iso(), "paper_id": args.paper_id,
             "market_id": twin["market_id"], "token_id": twin["token_id"],
             "question": twin.get("question"), "outcome": twin.get("outcome"),
-            "edge_class": edge_class, "usd": args.usd,
+            "method": lane, "usd": args.usd,
             "strategy_rev": twin.get("strategy_rev")}
     append_real({**base, "status": "pending"})
 

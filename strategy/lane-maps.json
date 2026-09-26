@@ -1,0 +1,120 @@
+{
+  "_comment": "AGENT-EDITABLE. `series`: market series whose resolution rules I have verified against the lane model's inputs, keyed by the `series` field strategy/tools/lanes.py prints (lane + question with numbers blanked; devig: league + shape). Record what the market resolves on (price source, window, touch vs close, timezone), how that maps to the model inputs, and when I checked. `excluded`: series the model must not price for now, with the reason and an `until` date (e.g. a barrier_equity series whose window contains an earnings release). `lanes.py plan --verified-only` uses verified series only and always skips excluded ones. Remove a verified entry the moment a settlement shows the mapping was wrong.",
+  "series": {
+    "devig:cfb:moneyline": {
+      "source": "Polymarket resolves to the team that wins the game, OT included, tie->50-50 (moneyline, no draw in practice)",
+      "window": "single game, commence_time from the book event",
+      "checked_at": "2026-09-26T13:00:00Z",
+      "note": "checked description on market 4802819 (Texas vs. Tennessee); matches devig lane's who-wins-the-game model",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will Bitcoin reach $# in September?": {
+      "source": "Binance BTC/USDT 1m candle, final High >= level, immediate resolve",
+      "window": "calendar month, 00:00 ET first day to 23:59 ET last day",
+      "checked_at": "2026-09-26T13:00:00Z",
+      "note": "checked 4052418; touch-up pricer matches",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will Bitcoin dip to $# in September?": {
+      "source": "Binance BTC/USDT 1m candle, final Low <= level, immediate resolve",
+      "window": "calendar month (or from market creation if listed mid-month; price action before creation not considered)",
+      "checked_at": "2026-09-26T13:00:00Z",
+      "note": "checked 4689737-style sibling (ETH dip) description text; same template applies to BTC dip",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will Ethereum reach $# in September?": {
+      "source": "Binance ETH/USDT 1m candle, final High >= level, immediate resolve",
+      "window": "calendar month or from market creation for mid-month listings",
+      "checked_at": "2026-09-26T13:00:00Z",
+      "note": "checked 4844455 (created Sept 22); pricer uses days-to-end + current spot, which is unaffected by window start",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will Ethereum dip to $# in September?": {
+      "source": "Binance ETH/USDT 1m candle, final Low <= level, immediate resolve",
+      "window": "from market creation (Sept 18) through month end",
+      "checked_at": "2026-09-26T13:00:00Z",
+      "note": "checked 4689737",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will Solana reach $# in September?": {
+      "source": "Binance SOL/USDT 1m candle, final High >= level, immediate resolve",
+      "window": "calendar month",
+      "checked_at": "2026-09-26T13:00:00Z",
+      "note": "checked 4052471",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will XRP reach $# in September?": {
+      "source": "Binance XRP/USDT 1m candle, final High >= level, immediate resolve",
+      "window": "calendar month",
+      "checked_at": "2026-09-26T13:00:00Z",
+      "note": "same Binance touch template as other crypto reach markets",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will XRP hit $# by September # #?": {
+      "source": "Binance XRP/USDT 1m candle, final High >= level, immediate resolve",
+      "window": "from market creation through the named date",
+      "checked_at": "2026-09-26T13:00:00Z",
+      "note": "checked 3750543 (hit $2 by Sept 30)",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will WTI Crude Oil (WTI) hit (HIGH) $# in September?": {
+      "source": "Pyth Active Month WTI futures 1m candle, final High >= level, after market creation",
+      "window": "calendar month trading sessions",
+      "checked_at": "2026-09-26T13:00:00Z",
+      "note": "checked 4063373-style sibling; source is Pyth not Binance, unlike crypto",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will WTI Crude Oil (WTI) hit (LOW) $# in September?": {
+      "source": "Pyth Active Month WTI futures 1m candle, final Low <= level, after market creation",
+      "window": "calendar month trading sessions",
+      "checked_at": "2026-09-26T13:00:00Z",
+      "note": "checked 4063373",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will S&P # (SPY) hit (HIGH) $# in September?": {
+      "source": "Pyth S&P 500 (SPY) 1m candle, final High >= level, regular trading hours only (9:30am-4:00pm ET), after market creation",
+      "window": "calendar month",
+      "checked_at": "2026-09-26T13:25:00Z",
+      "note": "checked 3866443; vol source ^VIX (yahoo_index) is itself annualized on a calendar-day convention (CBOE methodology), matching touch.py's default year_days=365 with no mismatch",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will Gold (XAUUSD) hit (HIGH) $# in September?": {
+      "source": "Pyth Gold (XAUUSD) 1m candle, final High >= level, applicable trading session (~24h Sun 6pm ET-Fri 5pm ET), after market creation; resolves No if no trade in window",
+      "window": "calendar month trading sessions",
+      "checked_at": "2026-09-26T13:25:00Z",
+      "note": "checked 4472224; vol source ^GVZ (yahoo_index) is calendar-day annualized like VIX, matches touch.py's 365-day convention",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier:Will Silver (XAGUSD) hit (HIGH) $# in September?": {
+      "source": "Pyth Silver (XAGUSD) 1m candle, final High >= level, applicable trading session (~24h Sun 6pm ET-Fri 5pm ET), after market creation; resolves No if no trade in window",
+      "window": "calendar month trading sessions",
+      "checked_at": "2026-09-26T13:25:00Z",
+      "note": "checked 4884190; vol source is 30d realized vol from SI=F daily closes (252-day annualized) combined with touch.py's calendar-day time input (365) - a small (~3-4%) annualization mismatch over a full-month window, judged acceptable; see journal/proposals.md for a possible trading-day-count fix",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26",
+      "operator_note": "the 252-vs-365 clock mismatch this entry flags was fixed in lanes.py the same day (realized-vol underlyings now count weekdays over 252)"
+    },
+    "barrier_equity:Will Coinbase Global, Inc. (COIN) hit (HIGH) $# in September?": {
+      "source": "Pyth COIN 1m candle, final High >= level, regular trading hours only (9:30am-4:00pm ET), after market creation",
+      "window": "calendar month",
+      "checked_at": "2026-09-26T13:25:00Z",
+      "note": "checked 3866352; no earnings release in window (COIN Q3 2026 earnings forecast ~Oct 29 2026, per web search, well after Sept 30 window close); same realized-vol/calendar-day annualization nuance as Silver, small over a full-month window",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier_equity:Will Coinbase Global, Inc. (COIN) hit (LOW) $# in September?": {
+      "source": "Pyth COIN 1m candle, final Low <= level, regular trading hours only (9:30am-4:00pm ET), after market creation",
+      "window": "calendar month",
+      "checked_at": "2026-09-26T13:25:00Z",
+      "note": "checked 4690407; same earnings check and vol-annualization nuance as the COIN HIGH series above",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26"
+    },
+    "barrier_equity:Will MicroStrategy (MSTR) hit (LOW) $# Week of September # #?": {
+      "source": "Pyth MSTR 1m candle, final Low <= level, regular trading hours only (9:30am-4:00pm ET), after market creation",
+      "window": "single trading week (Mon-Fri)",
+      "checked_at": "2026-09-26T13:25:00Z",
+      "note": "checked 4963882 (week of Sept 28-Oct 2); no earnings release in window (MSTR Q3 2026 earnings forecast ~Oct 29-Nov 4 2026, per web search); short weekly window makes the realized-vol (252-day) vs touch.py's calendar-day (365) time input mismatch bigger in relative terms than for monthly series (~7% vol understatement estimated for this window given the weekend before it) - conservative direction (understates rather than invents edge) but flagged in journal/proposals.md for a possible trading-day-count fix before relying on more weekly barrier_equity rows",
+      "verified_by": "v2 acceptance-test FULL cycle (Sonnet 5), 2026-09-26",
+      "operator_note": "the 252-vs-365 clock mismatch this entry flags was fixed in lanes.py the same day (realized-vol underlyings now count weekdays over 252)"
+    }
+  },
+  "excluded": {}
+}

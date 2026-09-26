@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""Scoring & calibration report over settled paper positions.
+"""Scoring & calibration report over settled paper positions and forecasts.
 
 PROTECTED CORE — the trading agent must not edit files under core/.
 
-Reports, overall and per category:
-  n, win rate, P&L, ROI, mean Brier (agent) vs mean Brier (market price at
-  entry) — the single most important number: negative brier_delta means the
-  agent's estimates beat the market's own price as a forecast.
-Also a calibration table (est-prob buckets vs realized frequency) and
-per-strategy-revision P&L so self-improvement is measurable across commits.
+The primary table is BY METHOD (lane, config/lanes.json): Phil v2 trades
+lanes, fits the market-shrinkage weight lambda per lane, and promotes lanes
+on their own record. brier_delta = Brier(agent) - Brier(market); negative
+means the agent's estimate beat the market's own price as a forecast. P&L is
+net of taker fees. Uncertainty is clustered by event (core/stats.py), so
+sibling markets on one event count once.
+
+Reported:
+  bets       overall (+ luck-adjusted z), by era (pre-engine legacy vs engine),
+             by method, open positions marked to market
+  forecasts  overall, by method (n, events, brier_delta, current lambda),
+             by category (n >= 10), calibration, revised-away slice
 
 Usage: python3 core/score.py [--json] [--skip-mtm]
 """
@@ -21,248 +27,170 @@ import sys
 from collections import defaultdict
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import decision  # noqa: E402
 import pmapi  # noqa: E402
+import stats as st  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LEDGER = ROOT / "journal" / "ledger.jsonl"
 FORECASTS = ROOT / "journal" / "forecasts.jsonl"
+PROTECTED = json.loads((ROOT / "config" / "protected.json").read_text())
+LANES = json.loads((ROOT / "config" / "lanes.json").read_text())["lanes"]
+MIN_CATEGORY_N = 10
 
 
-def stats(entries):
-    n = len(entries)
-    wins = sum(1 for e in entries if e["status"] == "won")
-    pnl = sum(e["pnl_usd"] for e in entries)
-    staked = sum(e["stake_usd"] for e in entries)
-    brier_agent = sum((e["est_prob"] - (1 if e["status"] == "won" else 0)) ** 2
-                      for e in entries) / n
-    brier_market = sum((e["market_prob_at_entry"] - (1 if e["status"] == "won" else 0)) ** 2
-                       for e in entries) / n
-    return {
-        "n": n, "wins": wins, "win_rate": round(wins / n, 3),
-        "pnl_usd": round(pnl, 2), "roi": round(pnl / staked, 3) if staked else 0,
-        "brier_agent": round(brier_agent, 4), "brier_market": round(brier_market, 4),
-        "brier_delta": round(brier_agent - brier_market, 4),
-    }
+def read_jsonl(path):
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def fstats(rows):
-    """Brier stats for stake-free forecast rows (baseline = mid at record time).
-
-    Not comparable to bet stats(): bets baseline on the fill ask, forecasts on
-    the mid — the sections stay separate by design.
-    """
-    n = len(rows)
+def luck_adjusted(rows):
+    """Expected wins under the agent's own estimates vs actual, as a z-score:
+    if every est_prob were right, wins ~ sum(p) +- sqrt(sum p(1-p))."""
+    exp = sum(r["est_prob"] for r in rows)
+    var = sum(r["est_prob"] * (1 - r["est_prob"]) for r in rows)
     wins = sum(1 for r in rows if r["status"] == "won")
-    brier_agent = sum((r["est_prob"] - (1 if r["status"] == "won" else 0)) ** 2
-                      for r in rows) / n
-    brier_market = sum((r["market_prob_at_record"] - (1 if r["status"] == "won" else 0)) ** 2
-                       for r in rows) / n
-    return {
-        "n": n, "wins": wins, "win_rate": round(wins / n, 3),
-        "brier_agent": round(brier_agent, 4), "brier_market": round(brier_market, 4),
-        "brier_delta": round(brier_agent - brier_market, 4),
-    }
+    return {"expected_wins": round(exp, 2), "actual_wins": wins,
+            "z": round((wins - exp) / math.sqrt(var), 2) if var > 0 else 0.0}
 
 
-EDGE_GRID = [0.02, 0.03, 0.04, 0.05, 0.07, 0.10, 0.15]
+def bet_stats(bets):
+    rows = [dict(b, stake=b["stake_usd"], pnl=b["pnl_usd"], event=decision.event_of(b))
+            for b in bets]
+    return {**st.clustered_roi(rows),
+            "wins": sum(1 for b in bets if b["status"] == "won"),
+            "fees": round(sum(b.get("fee_usd", 0.0) for b in bets), 2),
+            "brier_delta": st.brier_delta(bets, mkt_key="market_prob_at_entry")}
 
 
-def threshold_sweep(fsettled):
-    """Counterfactual bet policies over settled forecasts: for each edge floor
-    X, simulate a flat 1.0-unit bet on every forecast whose recorded edge
-    (est_prob - best_ask_at_record — the BET fill convention, not the mid the
-    forecast brier section baselines on) was >= X, filled at the recorded ask.
-
-    Scale-free pnl units (multiply by any flat stake). Answers "is this
-    min_edge floor calibrated?" against every settled forecast at once —
-    but only for the RESEARCHED candidate stream, at recorded-ask fills,
-    with same-day correlation; mind small n.
-    """
-    eligible = [r for r in fsettled if r.get("best_ask_at_record") is not None]
-    out = []
-    for x in EDGE_GRID:
-        # round like ledger.py's edge field, so exact-boundary edges (0.30 -
-        # 0.28 = 0.0199999...) land in their bucket instead of float-dropping out
-        rows = [r for r in eligible
-                if round(r["est_prob"] - r["best_ask_at_record"], 4) >= x]
-        if not rows:
-            out.append({"edge_min": x, "n": 0})
-            continue
-        wins = sum(1 for r in rows if r["status"] == "won")
-        pnl = sum((1 / r["best_ask_at_record"] - 1) if r["status"] == "won" else -1.0
-                  for r in rows)
-        out.append({
-            "edge_min": x, "n": len(rows), "wins": wins,
-            "pnl_units": round(pnl, 3), "roi": round(pnl / len(rows), 3),
-            "brier_delta": fstats(rows)["brier_delta"],
-        })
-    return out
+def forecast_stats(rows, lam=None):
+    return {"n": len(rows), "events": len({decision.event_of(r) for r in rows}),
+            "win_rate": round(sum(1 for r in rows if r["status"] == "won") / len(rows), 3),
+            "brier_delta": st.brier_delta(rows), **({"lam": lam} if lam else {})}
 
 
-BLEND_GRID = [0.5, 0.6, 0.7, 0.8, 0.9]
-
-
-def blend_sweep(fsettled):
-    """Does the estimate add information at the market's margin? For each
-    market weight w, the Brier of the blend w*mid + (1-w)*est over settled
-    forecasts, against the market's own Brier, plus the closed-form optimal
-    w (the least-squares minimizer over the blend line). Reported overall
-    and on the disagreement slice (|est-mid| >= 0.05) — the only rows where
-    a blend policy would change a decision; at-market rows drag every blend
-    delta toward zero by construction.
-
-    This is the adoption gate for market-prior blending (edge-research plan
-    2026-08-24, rec 2): blending replaces the outside-view veto only if
-    w_opt moves materially below 1.0 on a disagreement slice big enough to
-    trust. First run (2026-08-25, n=254/42): w_opt 0.93 overall, 1.11 on
-    disagreements — the estimate added no information at the margin and the
-    veto stayed.
-    """
-    def slice_stats(rows):
-        if not rows:
-            return {"n": 0}
-        d = [(r["est_prob"], r["market_prob_at_record"],
-              1.0 if r["status"] == "won" else 0.0) for r in rows]
-        n = len(d)
-        bm = sum((m - y) ** 2 for e, m, y in d) / n
-        out = {"n": n, "brier_market": round(bm, 4),
-               "brier_est": round(sum((e - y) ** 2 for e, m, y in d) / n, 4),
-               "by_weight": []}
-        for w in BLEND_GRID:
-            bb = sum((w * m + (1 - w) * e - y) ** 2 for e, m, y in d) / n
-            out["by_weight"].append(
-                {"w_market": w, "brier": round(bb, 4),
-                 "delta_vs_market": round(bb - bm, 4)})
-        den = sum((m - e) ** 2 for e, m, y in d)
-        if den > 0:
-            wopt = sum((m - e) * (y - e) for e, m, y in d) / den
-            bo = sum((wopt * m + (1 - wopt) * e - y) ** 2 for e, m, y in d) / n
-            out["w_opt"] = round(wopt, 3)
-            out["brier_at_w_opt"] = round(bo, 4)
-            out["w_opt_delta_vs_market"] = round(bo - bm, 4)
-        return out
-
-    return {"overall": slice_stats(fsettled),
-            "disagreement": slice_stats(
-                [r for r in fsettled
-                 if abs(r["est_prob"] - r["market_prob_at_record"]) >= 0.05])}
-
-
-def threshold_sweep_no(fsettled):
-    """Complement-side counterfactual of threshold_sweep: for each edge floor
-    X, simulate a flat 1.0-unit bet AGAINST every forecast whose complement
-    edge (best_bid_at_record - est_prob, i.e. buy the other side at
-    1 - best_bid) was >= X. A row wins when the forecasted outcome LOST.
-
-    Without this slice, a disagreement where the estimate sits far below a
-    wide market is invisible to the sweep, and every sweep-derived floor
-    argument reasons over only the Yes-side half of the disagreement rows
-    (2026-08-14 proposal; the side split went stale twice when hand-computed).
-    brier_delta is symmetric for a binary outcome, so fstats applies as-is.
-    Rows lacking best_bid_at_record are skipped; the caller reports the count.
-    """
-    eligible = [r for r in fsettled if r.get("best_bid_at_record") is not None
-                and r["best_bid_at_record"] < 1.0]
-    out = []
-    for x in EDGE_GRID:
-        rows = [r for r in eligible
-                if round(r["best_bid_at_record"] - r["est_prob"], 4) >= x]
-        if not rows:
-            out.append({"edge_min": x, "n": 0})
-            continue
-        wins = sum(1 for r in rows if r["status"] == "lost")
-        pnl = sum((1 / (1 - r["best_bid_at_record"]) - 1) if r["status"] == "lost" else -1.0
-                  for r in rows)
-        out.append({
-            "edge_min": x, "n": len(rows), "wins": wins,
-            "pnl_units": round(pnl, 3), "roi": round(pnl / len(rows), 3),
-            "brier_delta": fstats(rows)["brier_delta"],
-        })
-    return out
-
-
-def forecast_report(frows):
-    # Superseded rows (record --supersede) still settle, but only the latest
-    # row per market+outcome counts in the headline stats; the abandoned
-    # estimates get their own slice so "do my revisions help?" stays a
-    # measured question (PLBY 2026-08-10: the revision was worse).
-    live = [r for r in frows if not r.get("superseded_by")]
-    revised = [r for r in frows if r.get("superseded_by")]
-    fsettled = [r for r in live if r["status"] in ("won", "lost")]
-    n_open = sum(1 for r in live if r["status"] == "open")
-    rsettled = [r for r in revised if r["status"] in ("won", "lost")]
-    revised_away = {"settled": len(rsettled),
-                    "open": sum(1 for r in revised if r["status"] == "open")}
-    if rsettled:
-        revised_away.update(fstats(rsettled))
-    if not fsettled:
-        return {"settled": 0, "open": n_open, "revised_away": revised_away}
-    rep = {"overall": fstats(fsettled), "luck_adjusted": luck_adjusted(fsettled),
-           "by_category": {}, "by_skip_reason": {}, "calibration": [],
-           "threshold_sweep": threshold_sweep(fsettled),
-           "threshold_sweep_no": threshold_sweep_no(fsettled),
-           "blend_sweep": blend_sweep(fsettled),
-           "threshold_sweep_no_skipped": sum(
-               1 for r in fsettled if r.get("best_bid_at_record") is None),
-           "open": n_open,
-           "revised_away": revised_away}
-    by_cat = defaultdict(list)
-    by_reason = defaultdict(list)
+def calibration(rows):
     buckets = defaultdict(list)
-    for r in fsettled:
-        by_cat[r["category"]].append(r)
-        by_reason[r.get("skip_reason") or "unclassified"].append(r)
+    for r in rows:
         buckets[min(int(r["est_prob"] * 10), 9)].append(r)
-    for cat, rs in sorted(by_cat.items()):
-        rep["by_category"][cat] = fstats(rs)
-    for reason, rs in sorted(by_reason.items()):
-        rep["by_skip_reason"][reason] = fstats(rs)
-    for b in sorted(buckets):
-        rs = buckets[b]
-        rep["calibration"].append({
-            "est_range": f"{b/10:.1f}-{(b+1)/10:.1f}", "n": len(rs),
-            "realized": round(sum(1 for r in rs if r["status"] == "won") / len(rs), 3),
-        })
-    return rep
-
-
-def luck_adjusted(entries):
-    """Expected wins under the agent's own estimates vs actual, as a z-score.
-
-    Distinguishes "estimates were wrong" from "estimates were fine, variance
-    hit": if every est_prob were exactly right, wins ~ sum(p) ± sqrt(sum p(1-p)).
-    """
-    exp = sum(e["est_prob"] for e in entries)
-    var = sum(e["est_prob"] * (1 - e["est_prob"]) for e in entries)
-    wins = sum(1 for e in entries if e["status"] == "won")
-    z = (wins - exp) / math.sqrt(var) if var > 0 else 0.0
-    return {"expected_wins": round(exp, 2), "actual_wins": wins, "z": round(z, 2)}
+    return [{"est_range": f"{b/10:.1f}-{(b+1)/10:.1f}", "n": len(rs),
+             "realized": round(sum(1 for r in rs if r["status"] == "won") / len(rs), 3)}
+            for b, rs in sorted(buckets.items())]
 
 
 def mark_to_market(open_entries):
     """Best-effort live marks for open positions (needs network)."""
     now = dt.datetime.now(dt.timezone.utc)
-    rows = []
+    out = []
     for e in open_entries:
         try:
             bid, ask = pmapi.best_prices(e["token_id"])
         except Exception as err:  # noqa: BLE001 — MTM is advisory, never fatal
-            rows.append({"id": e["id"], "error": str(err)[:80]})
+            out.append({"id": e["id"], "error": str(err)[:80]})
             continue
         mid = (bid + ask) / 2 if bid is not None and ask is not None else bid or ask or 0.0
-        past_end = False
-        try:
-            past_end = dt.datetime.fromisoformat(e["end_date"].replace("Z", "+00:00")) < now
-        except Exception:  # noqa: BLE001
-            pass
-        rows.append({
-            "id": e["id"], "q": e["question"][:60], "outcome": e["outcome"],
-            "entry": e["entry_price"], "mid": round(mid, 3),
-            "cost_usd": e["stake_usd"], "mark_usd": round(e["shares"] * mid, 2),
-            "unrealized_usd": round(e["shares"] * mid - e["stake_usd"], 2),
-            "past_end_date": past_end,
+        end = decision.parse_ts(e.get("end_date"))
+        out.append({"id": e["id"], "q": e["question"][:60], "outcome": e["outcome"],
+                    "method": decision.method_of(e), "entry": e["entry_price"],
+                    "mid": round(mid, 3),
+                    "unrealized_usd": round(e["shares"] * mid - e["stake_usd"]
+                                            - e.get("fee_usd", 0.0), 2),
+                    "past_end_date": bool(end and end < now)})
+    return out
+
+
+def build(entries, frows, skip_mtm=True):
+    now = dt.datetime.now(dt.timezone.utc)
+    settled = [e for e in entries if e["status"] in ("won", "lost")]
+    rep = {"bets": {}, "forecasts": {}}
+    if settled:
+        by_method, by_era = defaultdict(list), defaultdict(list)
+        for e in settled:
+            by_method[decision.method_of(e)].append(e)
+            by_era["engine" if e.get("engine_rev") else "pre-engine"].append(e)
+        rep["bets"] = {
+            "overall": bet_stats(settled), "luck_adjusted": luck_adjusted(settled),
+            "by_era": {k: bet_stats(v) for k, v in sorted(by_era.items())},
+            "by_method": {k: bet_stats(v) for k, v in sorted(by_method.items())},
+        }
+    open_pos = [e for e in entries if e["status"] == "open"]
+    rep["bets"]["open"] = len(open_pos)
+    if open_pos and not skip_mtm:
+        rep["bets"]["open_mtm"] = mark_to_market(open_pos)
+
+    live = [r for r in frows if not r.get("superseded_by")]
+    fs = [r for r in live if r["status"] in ("won", "lost")]
+    revised = [r for r in frows if r.get("superseded_by") and r["status"] in ("won", "lost")]
+    rep["forecasts"]["open"] = sum(1 for r in live if r["status"] == "open")
+    if fs:
+        by_method, by_cat = defaultdict(list), defaultdict(list)
+        for r in fs:
+            by_method[decision.method_of(r)].append(r)
+            by_cat[r.get("category") or "?"].append(r)
+        methods = {}
+        for m in sorted(set(by_method) | set(LANES)):
+            fit = decision.lane_lambda(m, LANES.get(m, {}).get("status"), frows, now,
+                                       PROTECTED["engine"])
+            rows = by_method.get(m, [])
+            methods[m] = {**(forecast_stats(rows) if rows else {"n": 0, "events": 0}),
+                          "lam": fit["lam"], "lam_source": fit["source"], "w_opt": fit["w_opt"],
+                          "status": LANES.get(m, {}).get("status", "unregistered")}
+        rep["forecasts"].update({
+            "overall": forecast_stats(fs), "luck_adjusted": luck_adjusted(fs),
+            "by_method": methods,
+            "by_category": {c: forecast_stats(rs) for c, rs in sorted(by_cat.items())
+                            if len(rs) >= MIN_CATEGORY_N},
+            "calibration": calibration(fs),
+            "revised_away": forecast_stats(revised) if revised else {"n": 0},
         })
-    return rows
+    return rep
+
+
+def print_report(rep):
+    b = rep["bets"]
+    if b.get("overall"):
+        o, la = b["overall"], b["luck_adjusted"]
+        print(f"BETS settled={o['n_bets']} events={o['n_events']} wins={o['wins']} "
+              f"pnl(net)=${o['pnl']:+.2f} roi={o['roi']:+.3f} (event-clustered se "
+              f"{o['se']}) fees=${o['fees']:.2f} brier_delta={o['brier_delta']:+.4f}")
+        print(f"  luck-adjusted: expected wins (own ests)={la['expected_wins']} "
+              f"actual={la['actual_wins']} z={la['z']:+.2f}")
+        for title, table in (("by era", b["by_era"]), ("by method", b["by_method"])):
+            print(f"  {title}:")
+            for k, s in table.items():
+                print(f"    {k:11} n={s['n_bets']:3} ev={s['n_events']:3} "
+                      f"pnl=${s['pnl']:+8.2f} roi={s['roi']:+.3f} lcb={s['lcb']:+.3f} "
+                      f"brier_delta={s['brier_delta']:+.4f}")
+    print(f"  open positions: {b.get('open', 0)}")
+    for r in b.get("open_mtm", []):
+        if "error" in r:
+            print(f"    {r['id']} MTM unavailable: {r['error']}")
+        else:
+            flag = "  PAST END DATE" if r["past_end_date"] else ""
+            print(f"    {r['id']} {r['method']:8} {r['outcome'][:10]:10} entry={r['entry']} "
+                  f"mid={r['mid']} unrealized=${r['unrealized_usd']:+.2f}{flag}")
+    f = rep["forecasts"]
+    if not f.get("overall"):
+        print(f"FORECASTS settled=0 open={f.get('open', 0)}")
+        return
+    o, la = f["overall"], f["luck_adjusted"]
+    print(f"\nFORECASTS (mid baseline) settled={o['n']} events={o['events']} open={f['open']} "
+          f"brier_delta={o['brier_delta']:+.4f} luck z={la['z']:+.2f}")
+    print("  by method (lam = the engine's current market-shrinkage weight):")
+    for m, s in f["by_method"].items():
+        bd = "-" if s.get("brier_delta") is None else f"{s['brier_delta']:+.4f}"
+        w = "-" if s["w_opt"] is None else f"{s['w_opt']:+.2f}"
+        print(f"    {m:9} [{s['status']:13}] n={s['n']:4} ev={s['events']:4} "
+              f"brier_delta={bd} w_opt={w} lam={s['lam']:.2f} ({s['lam_source']})")
+    ra = f["revised_away"]
+    if ra.get("n"):
+        print(f"  revised-away: n={ra['n']} brier_delta={ra['brier_delta']:+.4f}")
+    print(f"  by category (n>={MIN_CATEGORY_N}):")
+    for c, s in f["by_category"].items():
+        print(f"    {c:24} n={s['n']:4} ev={s['events']:4} brier_delta={s['brier_delta']:+.4f}")
+    print("  calibration: " + "  ".join(
+        f"{c['est_range']}:n={c['n']},r={c['realized']:.2f}" for c in f["calibration"]))
 
 
 def main():
@@ -271,121 +199,11 @@ def main():
     ap.add_argument("--skip-mtm", action="store_true",
                     help="skip live mark-to-market of open positions (offline)")
     args = ap.parse_args()
-
-    entries = [json.loads(line) for line in LEDGER.read_text().splitlines() if line.strip()] \
-        if LEDGER.exists() else []
-    frows = [json.loads(line) for line in FORECASTS.read_text().splitlines() if line.strip()] \
-        if FORECASTS.exists() else []
-    settled = [e for e in entries if e["status"] in ("won", "lost")]
-    if not settled:
-        print(json.dumps({"settled": 0, "open": sum(1 for e in entries if e["status"] == "open"),
-                          "forecasts": forecast_report(frows)}))
-        return
-
-    report = {"overall": stats(settled), "luck_adjusted": luck_adjusted(settled),
-              "by_edge_class": {}, "by_category": {}, "by_strategy_rev": {},
-              "calibration": [], "forecasts": forecast_report(frows)}
-    by_class = defaultdict(list)
-    by_cat = defaultdict(list)
-    by_rev = defaultdict(list)
-    for e in settled:
-        by_class[e.get("edge_class") or "unclassified"].append(e)
-        by_cat[e["category"]].append(e)
-        by_rev[e.get("strategy_rev") or "unknown"].append(e)
-    for cls, es in sorted(by_class.items()):
-        report["by_edge_class"][cls] = stats(es)
-    for cat, es in sorted(by_cat.items()):
-        report["by_category"][cat] = stats(es)
-    for rev, es in sorted(by_rev.items()):
-        report["by_strategy_rev"][rev] = stats(es)
-
-    open_pos = [e for e in entries if e["status"] == "open"]
-    if open_pos and not args.skip_mtm:
-        report["open_mtm"] = mark_to_market(open_pos)
-
-    buckets = defaultdict(list)
-    for e in settled:
-        buckets[min(int(e["est_prob"] * 10), 9)].append(e)
-    for b in sorted(buckets):
-        es = buckets[b]
-        report["calibration"].append({
-            "est_range": f"{b/10:.1f}-{(b+1)/10:.1f}", "n": len(es),
-            "realized": round(sum(1 for e in es if e["status"] == "won") / len(es), 3),
-        })
-
+    rep = build(read_jsonl(LEDGER), read_jsonl(FORECASTS), skip_mtm=args.skip_mtm)
     if args.json:
-        print(json.dumps(report, indent=2))
-        return
-    o = report["overall"]
-    print(f"settled={o['n']} win_rate={o['win_rate']} pnl=${o['pnl_usd']} roi={o['roi']}")
-    print(f"brier: agent={o['brier_agent']} market={o['brier_market']} "
-          f"delta={o['brier_delta']} ({'BEATING market' if o['brier_delta'] < 0 else 'behind market'})")
-    la = report["luck_adjusted"]
-    print(f"luck-adjusted: expected wins (own ests)={la['expected_wins']} "
-          f"actual={la['actual_wins']} z={la['z']:+.2f}")
-    print("\nby edge class:")
-    for cls, s in report["by_edge_class"].items():
-        print(f"  {cls:12} n={s['n']:3} win={s['win_rate']:.2f} pnl=${s['pnl_usd']:+8.2f} "
-              f"brier_delta={s['brier_delta']:+.4f}")
-    if report.get("open_mtm"):
-        print("\nopen positions (live mark-to-market, advisory):")
-        for r in report["open_mtm"]:
-            if "error" in r:
-                print(f"  {r['id']} MTM unavailable: {r['error']}")
-                continue
-            flag = " PAST END DATE" if r["past_end_date"] else ""
-            print(f"  {r['id']} {r['outcome']:3} entry={r['entry']} mid={r['mid']} "
-                  f"cost=${r['cost_usd']:.2f} mark=${r['mark_usd']:.2f} "
-                  f"unrealized=${r['unrealized_usd']:+.2f}{flag}")
-    print("\nby category:")
-    for cat, s in report["by_category"].items():
-        print(f"  {cat:12} n={s['n']:3} win={s['win_rate']:.2f} pnl=${s['pnl_usd']:+8.2f} "
-              f"brier_delta={s['brier_delta']:+.4f}")
-    print("\nby strategy rev:")
-    for rev, s in report["by_strategy_rev"].items():
-        print(f"  {rev[:8]:8} n={s['n']:3} pnl=${s['pnl_usd']:+8.2f} brier_delta={s['brier_delta']:+.4f}")
-    print("\ncalibration (est vs realized):")
-    for c in report["calibration"]:
-        print(f"  {c['est_range']}: n={c['n']:3} realized={c['realized']:.2f}")
-    fr = report["forecasts"]
-    if fr.get("overall"):
-        fo, fla = fr["overall"], fr["luck_adjusted"]
-        print("\nforecasts (stake-free, mid baseline — not comparable to bet brier):")
-        print(f"  settled={fo['n']} open={fr['open']} win_rate={fo['win_rate']} "
-              f"brier_delta={fo['brier_delta']:+.4f} z={fla['z']:+.2f}")
-        ra = fr.get("revised_away") or {}
-        if ra.get("settled") or ra.get("open"):
-            line = f"  revised-away: settled={ra['settled']} open={ra['open']}"
-            if "brier_delta" in ra:
-                line += f" brier_delta={ra['brier_delta']:+.4f}"
-            print(line)
-        for reason, s in fr["by_skip_reason"].items():
-            print(f"  [{reason:14}] n={s['n']:3} brier_delta={s['brier_delta']:+.4f}")
-        for cat, s in fr["by_category"].items():
-            print(f"  {cat:16} n={s['n']:3} brier_delta={s['brier_delta']:+.4f}")
-        print("  calibration: " + "  ".join(
-            f"{c['est_range']}:n={c['n']},r={c['realized']:.2f}" for c in fr["calibration"]))
-        for s in fr["threshold_sweep"]:
-            if s["n"]:
-                print(f"  sweep edge>={s['edge_min']:.2f}: n={s['n']:3} "
-                      f"win={s['wins']/s['n']:.2f} pnl={s['pnl_units']:+.2f}u "
-                      f"roi={s['roi']:+.3f} brier_delta={s['brier_delta']:+.4f}")
-        for s in fr.get("threshold_sweep_no", []):
-            if s["n"]:
-                print(f"  sweep-no edge>={s['edge_min']:.2f}: n={s['n']:3} "
-                      f"win={s['wins']/s['n']:.2f} pnl={s['pnl_units']:+.2f}u "
-                      f"roi={s['roi']:+.3f} brier_delta={s['brier_delta']:+.4f}")
-        if fr.get("threshold_sweep_no_skipped"):
-            print(f"  sweep-no skipped {fr['threshold_sweep_no_skipped']} rows lacking best_bid_at_record")
-        for name, s in (fr.get("blend_sweep") or {}).items():
-            if s.get("n") and "w_opt" in s:
-                print(f"  blend[{name}]: n={s['n']:3} "
-                      f"brier mkt={s['brier_market']:.4f} est={s['brier_est']:.4f} "
-                      f"w_opt={s['w_opt']:.3f} (delta {s['w_opt_delta_vs_market']:+.4f}) "
-                      + " ".join(f"w{b['w_market']:.1f}:{b['delta_vs_market']:+.4f}"
-                                 for b in s["by_weight"]))
+        print(json.dumps(rep, indent=2))
     else:
-        print(f"\nforecasts: settled=0 open={fr.get('open', 0)}")
+        print_report(rep)
 
 
 if __name__ == "__main__":
